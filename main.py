@@ -4,13 +4,15 @@ from app.config.settings import settings
 import uvicorn
 
 app = FastAPI(
-    title="RAG Document Embedding API",
-    description="API to create and manage RAG embeddings from PDF/DOCX",
-    version="1.0.0"
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="RAG Embeddings API",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 # Include Routes
-app.include_router(router, prefix="api/v1/rag-chatbot", tags=["RAG Embeddings"])
+app.include_router(router, prefix="/api/v1/rag-chatbot", tags=["RAG Embeddings"])
 
 # Main Entry Point
 if __name__ == "__main__":

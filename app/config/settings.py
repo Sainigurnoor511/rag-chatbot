@@ -2,10 +2,10 @@ from pydantic_settings import BaseSettings
 
 # Define the Settings class
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "YELO Code Generator"
+    PROJECT_NAME: str = "RAG CHATBOT API"
     VERSION: str = "1.0.0"
-    SECRET_TOKEN: str  # Automatically read from .env
-    DEEPSEEK_API_KEY: str
+    # SECRET_TOKEN: str  # Automatically read from .env
+    # DEEPSEEK_API_KEY: str
     ENVIRONMENT: str = "development"
 
     class Config:

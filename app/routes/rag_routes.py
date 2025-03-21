@@ -1,17 +1,33 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from ..services.rag_services import RAGService
+from ..config.settings import settings
+from ..services.rag_service import RAGService
+from ..controller.rag_controller import RAGController
+from ..config.logger import logger
 import os
 import shutil
 
 router = APIRouter()
 
-UPLOAD_DIR = "E:/Projects/ragbot/app/uploads"
+UPLOAD_DIR = "E:/Projects/rag-chatbot-api/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 
 @router.get("/status")
 async def status():
     """Health check endpoint."""
-    return {"status": "API is running!"}
+    return {
+        "project": settings.PROJECT_NAME, 
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT,
+        "status": "API is up and running",
+    }
+
+
+@router.post("/test-logs")
+async def test_logs():
+    """Test logging levels."""
+    return RAGController.logger_test()
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -29,11 +45,13 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Generate embeddings
     try:
-        result = RAGService.prepare_rag_documents(file_path)
-        return {
-            "message": "File uploaded and embeddings created",
-            "file_name": file.filename,
-            "result": result
-        }
+        result = RAGController.prepare_rag_documents(file_path)
+        if result:
+            return {
+                "message": "File uploaded and embeddings created",
+                "file_name": file.filename,
+            }
+            
     except Exception as e:
+        logger.error(str(e))
         raise HTTPException(status_code=500, detail=str(e))

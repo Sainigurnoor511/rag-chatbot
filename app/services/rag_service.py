@@ -40,37 +40,3 @@ class RAGService:
             return RAGService.docx_to_text(file_path)
         else:
             raise ValueError("Unsupported file format. Only PDF and DOCX are allowed.")
-
-    @staticmethod
-    def prepare_rag_documents(file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100):
-        """Splits the text and creates embeddings for RAG."""
-        
-        text = RAGService.get_text(file_path)
-
-        # Split text into chunks
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", " ", ""]
-        )
-        docs = text_splitter.create_documents([text])
-
-        # Create document objects with metadata
-        formatted_docs = [Document(page_content=doc.page_content, metadata={"source": file_path}) for doc in docs]
-
-        # Embedding model
-        embed_model = FastEmbedEmbeddings(model_name="BAAI/bge-base-en-v1.5")
-
-        # Create vector store
-        persist_directory = f"E:/Projects/ragbot/app/vector_databases/{os.path.basename(file_path)}"
-        os.makedirs(persist_directory, exist_ok=True)
-
-        vectorstore = Chroma.from_documents(
-            documents=formatted_docs,
-            embedding=embed_model,
-            persist_directory=persist_directory,
-            collection_name="rag"
-        )
-
-        logger.info(f"Embeddings stored in {persist_directory}")
-        return {"message": "Embeddings created successfully", "path": persist_directory}
