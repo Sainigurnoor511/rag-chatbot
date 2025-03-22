@@ -5,11 +5,20 @@ from ..controller.rag_controller import RAGController
 from ..config.logger import logger
 import os
 import shutil
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
 UPLOAD_DIR = "E:/Projects/rag-chatbot/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# FastAPI route to call chat_with_rag
+class ChatRequest(BaseModel):
+    channel_id: str
+    message: str
+    filename: str
+    # file_path: str
 
 
 @router.get("/status")
@@ -45,7 +54,9 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Generate embeddings
     try:
-        result = RAGController.prepare_rag_documents(file_path)
+        result = RAGController.prepare_rag_documents(file_path=file_path)
+        if result is None:
+            raise HTTPException(status_code=500, detail="Failed to generate embeddings.")
         if result:
             return {
                 "message": "File uploaded and embeddings created",
@@ -57,38 +68,14 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/chat-rag")
-async def chat_rag(
-    payload: dict = Body(...)
-):
-    """
-    RAG Chat Route:
-    - Takes JSON input with session_id.
-    - Automatically maintains chat history by session.
-    """
-
-    file_name = payload.get("file_name")
-    user_input = payload.get("user_input")
-    session_id = payload.get("session_id")
-
-    if not file_name or not user_input or not session_id:
-        raise HTTPException(status_code=400, detail="Missing required parameters: 'file_name', 'user_input', or 'session_id'")
-
-    file_path = os.path.join(UPLOAD_DIR, file_name)
-
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"File '{file_name}' not found")
-
+@router.post("/chat")
+async def chat(request: ChatRequest):
+    """API endpoint to handle RAG chat requests."""
     try:
-        response = RAGController.chat_with_rag(file_path, user_input, session_id)
-
-        return {
-            "message": "Chat response generated successfully",
-            "user_input": response["user_input"],
-            "bot_output": response["bot_output"],
-            "chat_history": response["chat_history"]
-        }
+        request_dict = request.model_dump()
+        response = RAGController().chat_with_rag(request=request_dict)
+        return JSONResponse(content=response)
 
     except Exception as e:
-        logger.error(f"Error during RAG chat: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
