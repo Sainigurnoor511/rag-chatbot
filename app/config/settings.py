@@ -4,8 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     PROJECT_NAME: str = "RAG CHATBOT API"
     VERSION: str = "1.0.0"
-    # SECRET_TOKEN: str  # Automatically read from .env
-    # DEEPSEEK_API_KEY: str
+    GROQ_API_KEY: str
     ENVIRONMENT: str = "development"
 
     class Config:
