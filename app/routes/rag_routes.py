@@ -8,7 +8,7 @@ import shutil
 
 router = APIRouter()
 
-UPLOAD_DIR = "E:/Projects/rag-chatbot-api/data/uploads"
+UPLOAD_DIR = "E:/Projects/rag-chatbot/data/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
