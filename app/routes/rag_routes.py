@@ -1,6 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Body
+import asyncio
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from ..config.settings import settings
-from ..services.rag_service import RAGService
 from ..controller.rag_controller import RAGController
 from ..config.logger import logger
 import os
@@ -10,10 +10,11 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
-UPLOAD_DIR = "E:/Projects/rag-chatbot/data/uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+PROJECT_NAME = settings.PROJECT_NAME
+PROJECT_VERSION = settings.VERSION,
+PROJECT_ENVIRONMENT = settings.ENVIRONMENT
+PROJECT_UPLOAD_DIRECTORY = settings.UPLOAD_DIR
 
-# FastAPI route to call chat_with_rag
 class ChatRequest(BaseModel):
     channel_id: str
     message: str
@@ -25,36 +26,27 @@ class ChatRequest(BaseModel):
 async def status():
     """Health check endpoint."""
     return {
-        "project": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "environment": settings.ENVIRONMENT,
+        "project": PROJECT_NAME,
+        "version": PROJECT_VERSION,
+        "environment": PROJECT_ENVIRONMENT,
         "status": "API is up and running",
     }
-
-
-@router.post("/test-logs")
-async def test_logs():
-    """Test logging levels."""
-    return RAGController.logger_test()
 
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Uploads PDF or DOCX file via form-data and generates embeddings."""
     
-    # Validate file format
     if not file.filename.endswith((".pdf", ".docx")):
         raise HTTPException(status_code=400, detail="Unsupported file format. Use PDF or DOCX.")
     
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    file_path = os.path.join(PROJECT_UPLOAD_DIRECTORY, file.filename)
 
-    # Save uploaded file
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Generate embeddings
     try:
-        result = RAGController.prepare_rag_documents(file_path=file_path)
+        result = RAGController().create_document_embeddings(file_path=file_path)
         if result is None:
             raise HTTPException(status_code=500, detail="Failed to generate embeddings.")
         if result:
@@ -73,9 +65,9 @@ async def chat(request: ChatRequest):
     """API endpoint to handle RAG chat requests."""
     try:
         request_dict = request.model_dump()
-        response = RAGController().chat_with_rag(request=request_dict)
+        response = RAGController().chat_with_document(request=request_dict)
         return JSONResponse(content=response)
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        raise HTTPException(status_code=500, detail=str(e))
