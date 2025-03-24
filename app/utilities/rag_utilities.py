@@ -17,7 +17,7 @@ from langchain.chains import (
     create_history_aware_retriever,
 )
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.embeddings import FastEmbedEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
 
 LOCAL_EMBEDDING_MODEL = settings.LOCAL_EMBEDDING_MODEL
@@ -37,7 +37,6 @@ class RAGUtilities:
 
     def __init__(self):
         """Initialize the LLM and embedding model in the constructor."""
-
         try:
             # Initialize LLM
             self.llm = ChatGroq(
@@ -46,22 +45,27 @@ class RAGUtilities:
                 model_name="llama-3.2-3b-preview",
             )
 
+            # Try loading the LOCAL_EMBEDDING_MODEL first, fallback to FAST_EMBEDDING_MODEL if it fails
+            self.embedding_model = self._load_local_or_fallback()
+
         except Exception as e:
-            logger.error(f"Error initializing LLM: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to initialize LLM")
-        
+            logger.error(f"Failed to initialize RAGUtilities: {str(e)}")
+            raise
+
+
+    def _load_local_or_fallback(self):
+        """Attempts to load the local embedding model, falls back to FAST_EMBEDDING_MODEL on failure."""
+
         try:
-            # Initialize embedding model
-            if LOCAL_EMBEDDING_MODEL:
-                self.embedding_model = OptimumEmbeddingWrapper(folder_name=LOCAL_EMBEDDING_MODEL)
-                logger.info(f"Using local embedding model")
-            else:
-                self.embedding_model = FastEmbedEmbeddings(model_name=FAST_EMBEDDING_MODEL)
-                logger.info(f"Using remote embedding model")
+            self.embedding_model = OptimumEmbeddingWrapper(folder_name=LOCAL_EMBEDDING_MODEL)
+            logger.info(f"Local model loaded successfully")
+            return self.embedding_model
         
         except Exception as e:
-            logger.error(f"Error initializing embedding model: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to initialize embedding model")
+            logger.warning(f"Local model not present, falling back to Fast Embed Model")
+            self.embedding_model = FastEmbedEmbeddings(model_name=settings.FAST_EMBEDDING_MODEL)
+            logger.info(f"Fallback model loaded successfully")
+            return self.embedding_model
 
 
     def get_embedding_model(self):
