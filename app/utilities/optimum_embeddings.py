@@ -1,6 +1,7 @@
 from llama_index.embeddings.huggingface_optimum import OptimumEmbedding
 from app.config.logger import logger
 
+
 class OptimumEmbeddingWrapper:
     """Wrapper class to make OptimumEmbedding compatible with LangChain."""
     
@@ -26,3 +27,23 @@ class OptimumEmbeddingWrapper:
         except Exception as e:
             logger.error(f"Failed to embed query: {str(e)}")
             raise
+
+
+
+
+class FastEmbedWrapper:
+    """Wrapper to make FastEmbed compatible with Chroma."""
+    
+
+    def __init__(self, model):
+        self.model = model
+
+
+    def embed_documents(self, texts):
+        """Wrapper method to make FastEmbed compatible with Chroma."""
+        return self.model.embed(texts)
+
+
+    def embed_query(self, text):
+        """Wrapper method to embed a single query."""
+        return self.model.embed([text])[0]
