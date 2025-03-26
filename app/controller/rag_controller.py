@@ -35,15 +35,15 @@ class RAGController:
 
         try:
             if not os.path.isfile(file_path):
-                logger.error(f"File upload error")
+                logger.error(f"File upload error.")
                 raise HTTPException(status_code=404, detail="File not found")
             
-            filename = file_path.split("/")[-1]
+            filename = os.path.basename(file_path)
             logger.info(f"Preparing RAG documents for file: {filename}")
 
             text = RAGService.get_text(file_path)
             if not text:
-                logger.warning(f"No content extracted from {file_path}.")
+                logger.warning(f"No content extracted from file: {filename}.")
                 return []
 
             # Split text into chunks
@@ -60,10 +60,11 @@ class RAGController:
                 for doc in docs
             ]
 
-            # Create vector store
-            persist_directory = f"{EMBEDDING_PATH}{os.path.basename(file_path)}"
+            # Use os.path.join to avoid invalid paths
+            persist_directory = os.path.join(EMBEDDING_PATH, os.path.basename(file_path))
             os.makedirs(persist_directory, exist_ok=True)
 
+            # Create vector store
             vectorstore = Chroma.from_documents(
                 documents=formatted_docs,
                 embedding=self.embedding_model,
@@ -77,7 +78,6 @@ class RAGController:
         except Exception as e:
             logger.error(f"Error in create_document_embeddings: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to create document embeddings")
-
 
 
     @timer
@@ -126,6 +126,7 @@ class RAGController:
 
             if results:
                 most_similar = min(results, key=itemgetter(1))
+                print(f">>>>>>>>>>>>>>>>>>>{most_similar=}")
                 most_similar_doc, highest_score = most_similar
                 metadata = most_similar_doc.metadata
                 source = metadata.get("source", "Unknown")

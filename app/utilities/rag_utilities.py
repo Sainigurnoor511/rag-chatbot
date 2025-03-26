@@ -4,7 +4,7 @@ from fastapi import HTTPException
 
 from app.config.logger import logger
 from app.config.settings import settings
-from app.utilities.optimum_embeddings import OptimumEmbeddingWrapper
+from app.utilities.optimum_embeddings import OptimumEmbeddingWrapper, FastEmbedWrapper
 
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
@@ -18,6 +18,7 @@ from langchain.chains import (
 )
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from fastembed import TextEmbedding
 
 
 LOCAL_EMBEDDING_MODEL = settings.LOCAL_EMBEDDING_MODEL
@@ -30,42 +31,55 @@ VECTOR_STORE_CACHE = {}
 # In-memory session storage
 SESSION_HISTORY = {}    
 
+# Store the global RAG instance
+rag_utilities = None
+
 
 class RAGUtilities:
     """Class for handling RAG (Retrieval-Augmented Generation) utilities."""
 
+    # Class-level caching to prevent reloading
+    _model_instance = None
+    _llm_instance = None
 
     def __init__(self):
-        """Initialize the LLM and embedding model in the constructor."""
+        """Initialize the LLM and embedding model only once."""
         try:
-            # Initialize LLM
-            self.llm = ChatGroq(
-                api_key=settings.GROQ_API_KEY,
-                temperature=0.1,
-                model_name="llama-3.2-3b-preview",
-            )
+            # Initialize LLM only once
+            if RAGUtilities._llm_instance is None:
+                RAGUtilities._llm_instance = ChatGroq(
+                    api_key=settings.GROQ_API_KEY,
+                    temperature=0.1,
+                    model_name="llama-3.2-3b-preview",
+                )
+                logger.info("LLM initialized successfully")
 
-            # Try loading the LOCAL_EMBEDDING_MODEL first, fallback to FAST_EMBEDDING_MODEL if it fails
-            self.embedding_model = self._load_local_or_fallback()
+            self.llm = RAGUtilities._llm_instance
+
+            # Use cached model if it exists
+            if RAGUtilities._model_instance is None:
+                RAGUtilities._model_instance = self._load_local_or_fallback()
+
+            self.embedding_model = RAGUtilities._model_instance
 
         except Exception as e:
             logger.error(f"Failed to initialize RAGUtilities: {str(e)}")
             raise
 
-
     def _load_local_or_fallback(self):
         """Attempts to load the local embedding model, falls back to FAST_EMBEDDING_MODEL on failure."""
-
         try:
-            self.embedding_model = OptimumEmbeddingWrapper(folder_name=LOCAL_EMBEDDING_MODEL)
-            logger.info(f"Local model loaded successfully")
-            return self.embedding_model
-        
+            embedding_model = OptimumEmbeddingWrapper(folder_name=settings.LOCAL_EMBEDDING_MODEL)
+            logger.info("Local model loaded successfully")
+            return embedding_model
+
         except Exception as e:
-            logger.warning(f"Local model not present, falling back to Fast Embed Model")
-            self.embedding_model = FastEmbedEmbeddings(model_name=settings.FAST_EMBEDDING_MODEL)
-            logger.info(f"Fallback model loaded successfully")
-            return self.embedding_model
+            logger.warning("Local model not found, falling back to FastEmbed model.")
+            embedding_model = FastEmbedWrapper(
+                TextEmbedding(model_name="BAAI/bge-base-en-v1.5", providers=["CUDAExecutionProvider"])
+            )
+            logger.info("Fallback model loaded successfully")
+            return embedding_model
 
 
     def get_embedding_model(self):
@@ -120,7 +134,8 @@ class RAGUtilities:
     def load_embeddings(self, filename: str):
         """Load embeddings from the specified document filename with caching."""
         try:
-            persist_directory = f"{EMBEDDING_PATH} / {filename}"
+            persist_directory = os.path.join(EMBEDDING_PATH, filename)
+            os.makedirs(persist_directory, exist_ok=True)
 
             # Use cached vector store if it exists
             if filename in VECTOR_STORE_CACHE:
