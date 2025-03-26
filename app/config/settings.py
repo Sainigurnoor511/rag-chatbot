@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     # Correctly resolved paths
     UPLOAD_DIR: str = str(BASE_DIR / "data" / "uploads" )
-    EMBEDDING_PATH: str = str(BASE_DIR / "data" / "database" )
+    EMBEDDING_DIR: str = str(BASE_DIR / "data" / "database" )
     LOCAL_EMBEDDING_MODEL: str = str(BASE_DIR / "app" / "models" / "bge-base-en-v1.5_ONNX" )
 
     # Logs directory

@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 
 
-EMBEDDING_PATH = settings.EMBEDDING_PATH
+EMBEDDING_DIR = settings.EMBEDDING_DIR
 
 class RAGController:
     """Controller class to handle RAG API requests."""
@@ -39,7 +39,7 @@ class RAGController:
                 raise HTTPException(status_code=404, detail="File not found")
             
             filename = os.path.basename(file_path)
-            logger.info(f"Preparing RAG documents for file: {filename}")
+            logger.info(f"Preparing vector database for : {filename}")
 
             text = RAGService.get_text(file_path)
             if not text:
@@ -61,7 +61,7 @@ class RAGController:
             ]
 
             # Use os.path.join to avoid invalid paths
-            persist_directory = os.path.join(EMBEDDING_PATH, os.path.basename(file_path))
+            persist_directory = os.path.join(EMBEDDING_DIR, os.path.basename(file_path))
             os.makedirs(persist_directory, exist_ok=True)
 
             # Create vector store

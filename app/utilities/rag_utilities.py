@@ -23,7 +23,7 @@ from fastembed import TextEmbedding
 
 LOCAL_EMBEDDING_MODEL = settings.LOCAL_EMBEDDING_MODEL
 FAST_EMBEDDING_MODEL = settings.FAST_EMBEDDING_MODEL
-EMBEDDING_PATH = settings.EMBEDDING_PATH
+EMBEDDING_DIR = settings.EMBEDDING_DIR
 
 # Cache to hold loaded vector stores
 VECTOR_STORE_CACHE = {}
@@ -134,7 +134,7 @@ class RAGUtilities:
     def load_embeddings(self, filename: str):
         """Load embeddings from the specified document filename with caching."""
         try:
-            persist_directory = os.path.join(EMBEDDING_PATH, filename)
+            persist_directory = os.path.join(EMBEDDING_DIR, filename)
             os.makedirs(persist_directory, exist_ok=True)
 
             # Use cached vector store if it exists
