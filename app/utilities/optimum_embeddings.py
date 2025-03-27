@@ -7,7 +7,7 @@ class OptimumEmbeddingWrapper:
     
     
     def __init__(self, folder_name):
-        self.embedding_model = OptimumEmbedding(folder_name=folder_name, device=0)
+        self.embedding_model = OptimumEmbedding(folder_name=folder_name)
     
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -33,17 +33,14 @@ class OptimumEmbeddingWrapper:
 
 class FastEmbedWrapper:
     """Wrapper to make FastEmbed compatible with Chroma."""
-    
 
     def __init__(self, model):
         self.model = model
 
-
     def embed_documents(self, texts):
         """Wrapper method to make FastEmbed compatible with Chroma."""
-        return self.model.embed(texts)
-
+        return list(self.model.embed(texts))
 
     def embed_query(self, text):
         """Wrapper method to embed a single query."""
-        return self.model.embed([text])[0]
+        return list(self.model.embed([text]))[0]

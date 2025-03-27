@@ -17,7 +17,6 @@ from langchain.chains import (
     create_history_aware_retriever,
 )
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from fastembed import TextEmbedding
 
 
@@ -77,11 +76,12 @@ class RAGUtilities:
             logger.warning("Local model not found, falling back to FastEmbed model.")
             embedding_model = FastEmbedWrapper(
                 TextEmbedding(
-                    model_name="BAAI/bge-small-en-v1.5",
+                    model_name="BAAI/bge-base-en-v1.5",
                     device_ids='0',
                     providers=["CUDAExecutionProvider"]
                 )
             )
+
             logger.info("Fallback model loaded successfully")
             return embedding_model
 
