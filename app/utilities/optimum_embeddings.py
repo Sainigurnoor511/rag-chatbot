@@ -7,7 +7,7 @@ class OptimumEmbeddingWrapper:
     
     
     def __init__(self, folder_name):
-        self.embedding_model = OptimumEmbedding(folder_name=folder_name)
+        self.embedding_model = OptimumEmbedding(folder_name=folder_name, device=0)
     
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:

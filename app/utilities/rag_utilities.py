@@ -76,7 +76,11 @@ class RAGUtilities:
         except Exception as e:
             logger.warning("Local model not found, falling back to FastEmbed model.")
             embedding_model = FastEmbedWrapper(
-                TextEmbedding(model_name="BAAI/bge-base-en-v1.5", providers=["CUDAExecutionProvider"])
+                TextEmbedding(
+                    model_name="BAAI/bge-small-en-v1.5",
+                    device_ids='0',
+                    providers=["CUDAExecutionProvider"]
+                )
             )
             logger.info("Fallback model loaded successfully")
             return embedding_model
