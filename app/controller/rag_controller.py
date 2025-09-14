@@ -91,7 +91,15 @@ class RAGController:
 
             if not channel_id or not message or not filename:
                 logger.warning("Invalid request payload")
-                raise HTTPException(status_code=400, detail="Invalid request payload")
+                return {
+                    "success": False,
+                    "message": "Invalid request payload",
+                    "data": {},
+                    "error": {
+                        "code": 400,
+                        "message": "Missing required fields: channel_id, message, or filename"
+                    }
+                }
 
             logger.info(f"Processing chat for channel: {channel_id}")
 
@@ -103,7 +111,15 @@ class RAGController:
 
             if retriever is None or vectorstore is None:
                 logger.error("Retriever or VectorStore not found")
-                raise HTTPException(status_code=404, detail="Retriever or VectorStore not found")
+                return {
+                    "success": False,
+                    "message": "Document not found or embeddings not available",
+                    "data": {},
+                    "error": {
+                        "code": 404,
+                        "message": "Please upload the document first to generate embeddings"
+                    }
+                }
 
             # Load or initialize chat history
             chat_history = session_data.get(channel_id, ChatMessageHistory(messages=[])) if session_data else ChatMessageHistory(messages=[])
@@ -126,7 +142,6 @@ class RAGController:
 
             if results:
                 most_similar = min(results, key=itemgetter(1))
-                print(f">>>>>>>>>>>>>>>>>>>{most_similar=}")
                 most_similar_doc, highest_score = most_similar
                 metadata = most_similar_doc.metadata
                 source = metadata.get("source", "Unknown")
@@ -165,5 +180,13 @@ class RAGController:
             return response_data
 
         except Exception as e:
-            logger.error(f"Error in chat_with_bot: {str(e)}")
-            raise HTTPException(status_code=500, detail="Internal Server Error")
+            logger.error(f"Error in chat_with_document: {str(e)}")
+            return {
+                "success": False,
+                "message": "Internal server error during chat processing",
+                "data": {},
+                "error": {
+                    "code": 500,
+                    "message": str(e)
+                }
+            }

@@ -1,5 +1,4 @@
-import asyncio
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File
 from ..config.settings import settings
 from ..controller.rag_controller import RAGController
 from ..config.logger import logger
@@ -9,6 +8,21 @@ import shutil
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from uuid import uuid4
+
+def create_error_response(message: str, error_code: int = 500, details: dict = None):
+    """Create a standardized error response."""
+    return JSONResponse(
+        status_code=error_code,
+        content={
+            "success": False,
+            "message": message,
+            "data": details or {},
+            "error": {
+                "code": error_code,
+                "message": message
+            }
+        }
+    )
 
 router = APIRouter()
 
@@ -41,8 +55,16 @@ async def status():
 async def upload_file(file: UploadFile = File(...)):
     """Uploads PDF or DOCX file via form-data and generates embeddings."""
     
+    # Validate file
+    if not file.filename:
+        return create_error_response("No filename provided.", 400)
+    
     if not file.filename.endswith((".pdf", ".docx")):
-        raise HTTPException(status_code=400, detail="Unsupported file format. Use PDF or DOCX.")
+        return create_error_response("Unsupported file format. Use PDF or DOCX.", 400)
+    
+    # Check file size (limit to 50MB)
+    if file.size and file.size > 50 * 1024 * 1024:
+        return create_error_response("File too large. Maximum size is 50MB.", 400)
 
     # Ensure upload directory exists
     os.makedirs(PROJECT_UPLOAD_DIRECTORY, exist_ok=True)
@@ -59,19 +81,31 @@ async def upload_file(file: UploadFile = File(...)):
         result = RAGController().create_document_embeddings(file_path=file_path)
 
         if result is None:
-            raise HTTPException(status_code=500, detail="Failed to generate embeddings.")
+            # Clean up uploaded file if embedding creation fails
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return create_error_response("Failed to generate embeddings.", 500)
 
         register_file(session_id, file_path, embedding_path)
 
         return {
-            "message": "File uploaded and embeddings created",
-            "file_name": file.filename,
-            "session_id": session_id
+            "success": True,
+            "message": "File uploaded and embeddings created successfully",
+            "data": {
+                "session_id": session_id,
+                "file_name": file.filename,
+                # "file_path": file_path,
+                # "embedding_path": embedding_path
+            },
+            "error": None
         }
 
     except Exception as e:
-        logger.error(str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error during file upload: {str(e)}")
+        # Clean up uploaded file on unexpected error
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return create_error_response("Internal server error during file processing", 500, {"details": str(e)})
 
 
 @router.post("/chat")
@@ -84,4 +118,4 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return create_error_response("Internal server error during chat processing", 500, {"details": str(e)})

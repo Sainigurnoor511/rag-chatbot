@@ -73,22 +73,24 @@ class RAGUtilities:
             return embedding_model
 
         except Exception as e:
-            logger.warning("Local model not found, falling back to FastEmbed model.")
-            embedding_model = FastEmbedWrapper(
-                TextEmbedding(
-                    model_name="BAAI/bge-base-en-v1.5",
-                    device_ids='0',
-                    providers=["CUDAExecutionProvider"]
+            logger.warning(f"Local model failed to load: {str(e)}. Falling back to FastEmbed model.")
+            try:
+                embedding_model = FastEmbedWrapper(
+                    TextEmbedding(
+                        model_name=settings.FAST_EMBEDDING_MODEL,
+                        device_ids='0',
+                        providers=["CUDAExecutionProvider"]
+                    )
                 )
-            )
-
-            logger.info("Fallback model loaded successfully")
-            return embedding_model
+                logger.info("Fallback model loaded successfully")
+                return embedding_model
+            except Exception as fallback_error:
+                logger.error(f"Both local and fallback models failed: {str(fallback_error)}")
+                raise HTTPException(status_code=500, detail="Failed to initialize embedding model")
 
 
     def get_embedding_model(self):
         """Returns the initialized embedding model."""
-        
         return self.embedding_model
 
 
@@ -108,7 +110,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in create_retriever: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create retriever")
+            return None, None
 
 
     def create_conversational_chain_history(self, retriever, store, filename) -> RunnableWithMessageHistory:
@@ -132,7 +134,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in create_conversational_chain_history: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create conversational chain")
+            raise e
 
 
     def load_embeddings(self, filename: str):
@@ -148,7 +150,7 @@ class RAGUtilities:
 
             if not os.path.exists(persist_directory) or not os.listdir(persist_directory):
                 logger.warning(f"No embeddings found for {filename}")
-                raise HTTPException(status_code=404, detail="No embeddings found")
+                return None
 
             logger.info(f"Loading embeddings from {persist_directory}")
 
@@ -164,7 +166,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in load_embeddings: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to load embeddings")
+            return None
 
 
     def create_question_answer_chain(self, llm, filename):
@@ -180,7 +182,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in create_question_answer_chain: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create QA chain")
+            raise e
 
 
     def create_contextualize_question_prompt(self, llm, retriever):
@@ -223,7 +225,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in create_contextualize_question_prompt: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create contextualized question prompt")
+            raise e
 
 
     def get_session_history(self, session_id: str, store: dict) -> BaseChatMessageHistory:
@@ -238,7 +240,7 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in get_session_history: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to get session history")
+            raise e
 
 
     def create_qa_prompt(self, filename) -> ChatPromptTemplate:
@@ -279,4 +281,4 @@ class RAGUtilities:
 
         except Exception as e:
             logger.error(f"Error in create_qa_prompt: {str(e)}")
-            raise HTTPException(status_code=500, detail="Failed to create QA prompt")
+            raise e

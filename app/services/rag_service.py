@@ -13,7 +13,16 @@ class RAGService:
         """Extracts text from a TXT file efficiently."""
         try:
             with open(txt_path, "r", encoding="utf-8") as file:
-                return file.read()
+                content = file.read().strip()
+                if not content:
+                    logger.warning(f"Empty TXT file: {txt_path}")
+                return content
+        except FileNotFoundError:
+            logger.error(f"TXT file not found: {txt_path}")
+            return ""
+        except UnicodeDecodeError as e:
+            logger.error(f"Unicode decode error in TXT file {txt_path}: {e}")
+            return ""
         except Exception as e:
             logger.error(f"Error extracting TXT: {e}")
             return ""
@@ -23,8 +32,16 @@ class RAGService:
         """Efficiently extracts text from a PDF file."""
         try:
             with fitz.open(pdf_path) as pdf:
-                text = "\n".join(page.get_text() for page in pdf)
-            return text
+                if len(pdf) == 0:
+                    logger.warning(f"Empty PDF file: {pdf_path}")
+                    return ""
+                text = "\n".join(page.get_text() for page in pdf if page.get_text().strip())
+                if not text.strip():
+                    logger.warning(f"No text content found in PDF: {pdf_path}")
+                return text
+        except FileNotFoundError:
+            logger.error(f"PDF file not found: {pdf_path}")
+            return ""
         except Exception as e:
             logger.error(f"Error extracting PDF: {e}")
             return ""
@@ -34,7 +51,13 @@ class RAGService:
         """Extracts text from a DOCX file efficiently."""
         try:
             doc = DocxDocument(docx_path)
-            return "\n".join(para.text for para in doc.paragraphs)
+            text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+            if not text.strip():
+                logger.warning(f"No text content found in DOCX: {docx_path}")
+            return text
+        except FileNotFoundError:
+            logger.error(f"DOCX file not found: {docx_path}")
+            return ""
         except Exception as e:
             logger.error(f"Error extracting DOCX: {e}")
             return ""

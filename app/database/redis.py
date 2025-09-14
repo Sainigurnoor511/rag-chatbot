@@ -1,27 +1,41 @@
 import redis
 import dill as pickle
-import logging
+from ..config.logger import logger
 from ..config.settings import settings
 
 # Initialize Redis client using FastAPI settings
-redis_client = redis.Redis(
-    host=settings.REDIS_HOST,
-    port=settings.REDIS_PORT,
-    db=0,
-    decode_responses=False  # To handle binary data serialization
-)
+try:
+    redis_client = redis.Redis(
+        host=settings.REDIS_HOST,
+        port=settings.REDIS_PORT,
+        db=0,
+        decode_responses=False,  # To handle binary data serialization
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True
+    )
+    # Test connection
+    redis_client.ping()
+    logger.info("Redis connection established successfully")
+except Exception as e:
+    logger.error(f"Failed to connect to Redis: {e}")
+    redis_client = None
 
 def save_session_to_redis(session_id: str, data: dict, expiry_seconds: int = 1200) -> bool:
     """
     Save the session history and chatbot state to Redis for 20 mins.
     """
+    if redis_client is None:
+        logger.warning("Redis client not available, skipping session save")
+        return False
+        
     try:
         serialized_data = pickle.dumps(data)
         redis_client.setex(session_id, expiry_seconds, serialized_data)
-        logging.info(f"Session {session_id} saved to Redis successfully")
+        logger.info(f"Session {session_id} saved to Redis successfully")
         return True
     except Exception as e:
-        logging.error(f"Failed to save session to Redis: {e}")
+        logger.error(f"Failed to save session to Redis: {e}")
         return False
 
 
@@ -29,15 +43,19 @@ def load_session_from_redis(session_id: str) -> dict:
     """
     Load the session history and chatbot state from Redis.
     """
+    if redis_client is None:
+        logger.warning("Redis client not available, returning None for session load")
+        return None
+        
     try:
         serialized_data = redis_client.get(session_id)
         if serialized_data:
             session_data = pickle.loads(serialized_data)
-            logging.info(f"Session {session_id} loaded from Redis successfully")
+            logger.info(f"Session {session_id} loaded from Redis successfully")
             return session_data
         return None
     except Exception as e:
-        logging.error(f"Failed to load session from Redis: {e}")
+        logger.error(f"Failed to load session from Redis: {e}")
         return None
 
 
@@ -45,12 +63,16 @@ def delete_session_from_redis(session_id: str) -> bool:
     """
     Delete a session from Redis.
     """
+    if redis_client is None:
+        logger.warning("Redis client not available, skipping session deletion")
+        return False
+        
     try:
         redis_client.delete(session_id)
-        logging.info(f"Session {session_id} deleted from Redis")
+        logger.info(f"Session {session_id} deleted from Redis")
         return True
     except Exception as e:
-        logging.error(f"Failed to delete session from Redis: {e}")
+        logger.error(f"Failed to delete session from Redis: {e}")
         return False
 
 
