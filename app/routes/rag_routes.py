@@ -44,6 +44,10 @@ async def upload_file(file: UploadFile = File(...)):
     if not file.filename.endswith((".pdf", ".docx")):
         raise HTTPException(status_code=400, detail="Unsupported file format. Use PDF or DOCX.")
 
+    # Ensure upload directory exists
+    os.makedirs(PROJECT_UPLOAD_DIRECTORY, exist_ok=True)
+    os.makedirs(PROJECT_EMBEDDING_DIRECTORY, exist_ok=True)
+
     session_id = str(uuid4())
     file_path = os.path.join(PROJECT_UPLOAD_DIRECTORY, file.filename)
     embedding_path = os.path.join(PROJECT_EMBEDDING_DIRECTORY, file.filename)

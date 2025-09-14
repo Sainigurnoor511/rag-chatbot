@@ -49,7 +49,7 @@ class RAGUtilities:
                 RAGUtilities._llm_instance = ChatGroq(
                     api_key=settings.GROQ_API_KEY,
                     temperature=0.1,
-                    model_name="llama-3.2-3b-preview",
+                    model_name=settings.GROQ_MODEL,
                 )
                 logger.info("LLM initialized successfully")
 

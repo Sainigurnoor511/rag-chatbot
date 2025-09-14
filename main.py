@@ -21,6 +21,14 @@ async def lifespan(app: FastAPI):
 
     # Startup event
     try:
+        # Ensure necessary directories exist before loading the model
+        logger.info("Creating necessary directories...")
+        os.makedirs(settings.LOG_DIR, exist_ok=True)
+        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+        os.makedirs(settings.EMBEDDING_DIR, exist_ok=True)
+        os.makedirs(settings.LOCAL_EMBEDDING_MODEL, exist_ok=True)
+        logger.info("Directories created successfully")
+
         rag_utilities = RAGUtilities()  # Load the model once
 
         # start background task for cleanup
@@ -50,12 +58,6 @@ app = FastAPI(
 
 # Include Routes
 app.include_router(router, prefix="/api/v1/rag-chatbot", tags=["RAG CHATBOT"])
-
-# Ensure necessary directories exist
-os.makedirs(settings.LOG_DIR, exist_ok=True)
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-os.makedirs(settings.EMBEDDING_DIR, exist_ok=True)
-os.makedirs(settings.LOCAL_EMBEDDING_MODEL, exist_ok=True)
 
 # Main Entry Point
 if __name__ == "__main__":

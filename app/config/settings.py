@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "RAG CHATBOT API"
     VERSION: str = "1.0.0"
     GROQ_API_KEY: str
+    GROQ_MODEL: str
     ENVIRONMENT: str = "development"
     
     # Redis Configuration
