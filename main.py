@@ -3,6 +3,7 @@ import asyncio
 import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
+import sentry_sdk
 
 from app.config.settings import settings
 from app.config.logger import logger
@@ -45,6 +46,13 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("Shutting down...")
 
+sentry_sdk.init(
+    dsn="https://da86afafaf1d6bfcdc920a8dddf30b01@o4510069167620096.ingest.us.sentry.io/4510069169324032",
+    # Add data like request headers and IP for users,
+    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    send_default_pii=True,
+    enable_logs=True,
+)
 
 # Initialize FastAPI app with `lifespan`
 app = FastAPI(

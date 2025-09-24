@@ -119,3 +119,8 @@ async def chat(request: ChatRequest):
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return create_error_response("Internal server error during chat processing", 500, {"details": str(e)})
+
+@router.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0
+    return division_by_zero
