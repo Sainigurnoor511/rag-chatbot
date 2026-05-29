@@ -61,13 +61,6 @@ class RAGController:
                 persist_directory=persist_directory,
                 collection_name=settings.CHROMA_COLLECTION_NAME,
             )
-            # Replace any prior chunks for this doc_id (idempotent re-upload).
-            try:
-                vectorstore._collection.delete(
-                    where={"doc_id": doc_id, "chunk_id_marker": "stale"}
-                )
-            except Exception:
-                pass
 
             logger.info(f"Embedded {len(docs)} chunks for '{filename}'")
             return {"message": "Embeddings created", "doc_id": doc_id,
