@@ -35,8 +35,7 @@ PROJECT_EMBEDDING_DIRECTORY = settings.EMBEDDING_DIR
 class ChatRequest(BaseModel):
     channel_id: str
     message: str
-    filename: str
-    # file_path: str
+    filename: str | None = None
 
 
 @router.get("/status")
