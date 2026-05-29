@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     CHROMA_COLLECTION_NAME: str = "rag_channel"
     CHANNEL_TTL_SECONDS: int = 1800  # 30 minutes
 
+    # Hybrid retrieval (Phase 2)
+    DENSE_TOP_K: int = 20
+    BM25_TOP_K: int = 20
+    RRF_K: int = 60
+    RERANK_TOP_N: int = 5
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
