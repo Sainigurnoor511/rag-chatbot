@@ -1,6 +1,4 @@
 import os
-from operator import itemgetter
-from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import HTTPException
 
@@ -125,7 +123,8 @@ class RAGController:
                 output = ("I couldn't find relevant information in the uploaded "
                           "documents to answer that question.")
             else:
-                output = utils.answer(user_input, context, chat_history.messages, filename or channel_id)
+                output = utils.answer(user_input, context, chat_history.messages,
+                                      filename or "the uploaded document(s)")
 
             chat_history.messages.append(HumanMessage(content=user_input))
             chat_history.messages.append(AIMessage(content=output))
