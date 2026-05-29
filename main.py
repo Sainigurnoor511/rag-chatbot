@@ -68,6 +68,10 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 # Include Routes
 app.include_router(router, prefix="/api/v1/rag-chatbot", tags=["RAG CHATBOT"])
 
+# Prometheus metrics
+from app.observability.metrics import instrument
+instrument(app, enabled=settings.METRICS_ENABLED)
+
 # Main Entry Point
 if __name__ == "__main__":
     uvicorn.run(
