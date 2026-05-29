@@ -120,7 +120,12 @@ class RAGController:
             docs = retriever.retrieve(standalone_query, filename=filename)
             context = "\n\n".join(d.page_content for d in docs)
 
-            output = utils.answer(user_input, context, chat_history.messages, filename or channel_id)
+            if not docs:
+                logger.warning(f"No relevant documents retrieved for channel {channel_id}")
+                output = ("I couldn't find relevant information in the uploaded "
+                          "documents to answer that question.")
+            else:
+                output = utils.answer(user_input, context, chat_history.messages, filename or channel_id)
 
             chat_history.messages.append(HumanMessage(content=user_input))
             chat_history.messages.append(AIMessage(content=output))

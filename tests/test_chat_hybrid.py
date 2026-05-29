@@ -63,3 +63,15 @@ def test_chat_no_embeddings_returns_404(patched, monkeypatch):
     )
     assert resp["success"] is False
     assert resp["error"]["code"] == 404
+
+
+def test_chat_no_relevant_docs_returns_grounded_fallback(patched, monkeypatch):
+    controller, saved = patched
+    monkeypatch.setattr(ctrl_mod.HybridRetriever, "retrieve",
+                        lambda self, query, filename=None: [])
+    resp = controller.chat_with_document({"channel_id": "chan-1", "message": "hello", "filename": None})
+    assert resp["success"] is True
+    out = resp["data"]["bot_output"].lower()
+    assert ("couldn't find" in out) or ("no relevant" in out)
+    assert "answer using context" not in out   # the LLM answer() path was skipped
+    assert saved["cid"] == "chan-1"
