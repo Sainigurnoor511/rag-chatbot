@@ -138,7 +138,9 @@ class RAGController:
                 output = utils.answer(user_input, context, chat_history.messages,
                                       filename or "the uploaded document(s)")
 
-            if settings.ENABLE_QUERY_CACHE:
+            # Only cache grounded answers — never the "no relevant docs" fallback,
+            # which would go stale the moment a document is added to the channel.
+            if settings.ENABLE_QUERY_CACHE and docs:
                 query_cache.set_cached(channel_id, user_input, filename, output, settings.QUERY_CACHE_TTL)
 
             chat_history.messages.append(HumanMessage(content=user_input))
