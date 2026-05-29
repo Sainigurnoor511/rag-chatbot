@@ -75,3 +75,14 @@ def test_chat_no_relevant_docs_returns_grounded_fallback(patched, monkeypatch):
     assert ("couldn't find" in out) or ("no relevant" in out)
     assert "answer using context" not in out   # the LLM answer() path was skipped
     assert saved["cid"] == "chan-1"
+
+
+def test_chat_returns_cached_answer_when_enabled(patched, monkeypatch):
+    controller, saved = patched
+    monkeypatch.setattr(ctrl_mod.settings, "ENABLE_QUERY_CACHE", True)
+    monkeypatch.setattr(ctrl_mod.query_cache, "get_cached",
+                        lambda channel_id, message, filename: "CACHED ANSWER")
+    resp = controller.chat_with_document({"channel_id": "chan-1", "message": "hi", "filename": None})
+    assert resp["success"] is True
+    assert resp["data"]["bot_output"] == "CACHED ANSWER"
+    assert "(cached)" in resp["message"]

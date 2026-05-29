@@ -11,6 +11,7 @@ from app.utilities.timer import timer
 from app.retrieval.chunking import chunk_text
 from app.retrieval import bm25_index
 from app.retrieval.hybrid_retriever import HybridRetriever
+from app.repository import query_cache
 
 from langchain_chroma import Chroma
 from langchain_core.messages import AIMessage, HumanMessage
@@ -106,6 +107,17 @@ class RAGController:
                               "message": "Please upload a document first to generate embeddings"},
                 }
 
+            if settings.ENABLE_QUERY_CACHE:
+                cached = query_cache.get_cached(channel_id, user_input, filename)
+                if cached is not None:
+                    logger.info(f"Query cache hit for channel {channel_id}")
+                    return {
+                        "success": True,
+                        "message": "Response generated successfully (cached)",
+                        "data": {"user_input": user_input, "bot_output": cached},
+                        "error": None,
+                    }
+
             session_data = load_session_from_redis(channel_id)
             chat_history = (
                 session_data.get(channel_id, ChatMessageHistory(messages=[]))
@@ -125,6 +137,9 @@ class RAGController:
             else:
                 output = utils.answer(user_input, context, chat_history.messages,
                                       filename or "the uploaded document(s)")
+
+            if settings.ENABLE_QUERY_CACHE:
+                query_cache.set_cached(channel_id, user_input, filename, output, settings.QUERY_CACHE_TTL)
 
             chat_history.messages.append(HumanMessage(content=user_input))
             chat_history.messages.append(AIMessage(content=output))

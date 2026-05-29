@@ -10,4 +10,9 @@ def fake_redis(monkeypatch):
     # Re-point modules that imported the client by name.
     import app.repository.channel_repository as repo
     monkeypatch.setattr(repo, "redis_client", client, raising=False)
+    try:
+        import app.repository.query_cache as qcache
+        monkeypatch.setattr(qcache, "redis_client", client, raising=False)
+    except Exception:
+        pass
     return client
