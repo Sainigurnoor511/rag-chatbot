@@ -37,7 +37,7 @@ OptimumEmbedding.create_and_save_optimum_model("BAAI/bge-base-en-v1.5", "app/mod
 
 Layered FastAPI app under `app/`, wired together in `main.py`:
 
-> **Production upgrade in progress.** This codebase is being upgraded from naive single-document RAG to a per-channel multi-document, hybrid-retrieval system. The design spec is at `docs/superpowers/specs/2026-05-29-production-rag-design.md` and phased plans under `docs/superpowers/plans/`. **Phases 1 (per-channel storage), 2 (hybrid retrieval + cross-encoder rerank), and 3 (production cross-cutting: auth, rate limiting, metrics, query cache, channel sweep) are complete**; Phase 4 (RAGAS eval harness) is not yet built. The notes below reflect the post-Phase-3 state.
+> **Production RAG (upgrade complete).** This codebase was upgraded from naive single-document RAG to a per-channel multi-document, hybrid-retrieval system across 4 phases. The design spec is at `docs/superpowers/specs/2026-05-29-production-rag-design.md` and phased plans under `docs/superpowers/plans/`. **All 4 phases are complete**: (1) per-channel storage, (2) hybrid retrieval + cross-encoder rerank, (3) production cross-cutting (auth, rate limiting, metrics, query cache, channel sweep), (4) evaluation harness. The notes below reflect the final state.
 
 - **`routes/rag_routes.py`** — HTTP layer. Endpoints (all under prefix `/api/v1/rag-chatbot`): `GET /status` (open), `POST /upload` (multipart: `channel_id` form field + `file`), `POST /chat` (JSON `{channel_id, message, filename?}`), `GET /sentry-debug` (raises 404 in production). `/upload` and `/chat` carry `Depends(require_api_key)` + a slowapi rate-limit decorator and take a `request: Request` param (slowapi requires it). Standardized JSON envelope (`success`/`message`/`data`/`error`) via `create_error_response`. On upload it registers the doc in the Redis channel manifest.
 - **`controller/rag_controller.py`** — orchestration. `create_document_embeddings(channel_id, file_path)` chunks text and **dual-writes**: upserts into the channel's Chroma collection AND appends to the channel BM25 index. `chat_with_document` is the explicit hybrid flow: validate → `load_embeddings(channel_id)` (404 if none) → load Redis history → `contextualize_question` (LLM rewrite) → `HybridRetriever.retrieve` → if no docs, return a grounded fallback **without** calling the LLM → else `answer` (LLM) → append+save history → envelope.
@@ -63,9 +63,11 @@ Layered FastAPI app under `app/`, wired together in `main.py`:
 - **Singleton via repeated instantiation.** Code calls `RAGUtilities()` / `RAGController()` freely — class-level caches make this cheap, but constructors still run.
 - **Sentry** is initialized in `main.py` with a hardcoded DSN; `GET /sentry-debug` deliberately raises a `ZeroDivisionError` to test it.
 
+- **`eval/`** — offline evaluation harness (Phase 4). `retrieval_metrics.py` (pure `hit_at_k`/`reciprocal_rank`/`summarize`); `golden_set.py` (generate/save/load a synthetic Q&A golden set via the LLM); `run_eval.py` (`compare_pipelines` naive dense-only vs hybrid, `format_report`/`write_report`, and `maybe_ragas_scores` which lazily imports RAGAS). **RAGAS deps are isolated in `requirements-eval.txt`, NOT the serving `requirements.txt`** (they would upgrade shared `langchain-core`/`dill`); install them in a separate venv to run answer-quality scoring. The serving test suite runs without RAGAS.
+
 ### Testing
 
-`pytest` (+ `fakeredis`) is set up; run the suite with `.venv\Scripts\python.exe -m pytest`. Tests live in `tests/` and follow TDD per the phase plans. Note: the project venv is uv-managed — if `python` errors with a missing interpreter path, run `uv python install 3.11.11` to restore it.
+`pytest` (+ `fakeredis`) is set up; run the suite with `.venv\Scripts\python.exe -m pytest` (61 tests). Tests live in `tests/` and follow TDD per the phase plans. The reranker and LLM are always mocked in tests — no model downloads or network calls. Note: the project venv is uv-managed — if `python` errors with a missing interpreter path, run `uv python install 3.11.11` to restore it.
 
 ## Conventions
 
