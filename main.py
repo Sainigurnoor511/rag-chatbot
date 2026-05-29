@@ -9,7 +9,6 @@ from app.config.settings import settings
 from app.config.logger import logger
 from app.routes.rag_routes import router
 from app.utilities.rag_utilities import RAGUtilities
-from app.utilities.file_embeddings_handler import cleanup_expired_files
 
 # Global variable for RAG model
 rag_utilities = None
@@ -31,9 +30,6 @@ async def lifespan(app: FastAPI):
         logger.info("Directories created successfully")
 
         rag_utilities = RAGUtilities()  # Load the model once
-
-        # start background task for cleanup
-        asyncio.create_task(cleanup_expired_files())
 
         yield  # Yield control to the app
 
