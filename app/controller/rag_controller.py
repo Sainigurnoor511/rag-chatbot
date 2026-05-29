@@ -12,6 +12,7 @@ from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
 from app.retrieval.chunking import chunk_text
 from app.retrieval import bm25_index
+from app.retrieval.hybrid_retriever import HybridRetriever
 
 from langchain_chroma import Chroma
 from langchain_core.messages import AIMessage, HumanMessage
@@ -76,102 +77,62 @@ class RAGController:
 
     @timer
     def chat_with_document(self, request: dict):
-        """Handles the RAG chat flow."""
+        """Hybrid RAG chat: contextualize -> hybrid retrieve -> answer, with Redis history."""
         try:
-            # Input validation
             channel_id = request.get("channel_id")
             message = request.get("message")
-            filename = request.get("filename")
+            filename = request.get("filename")  # optional: restricts to one doc in the channel
 
-            if not channel_id or not message or not filename:
+            if not channel_id or not message:
                 logger.warning("Invalid request payload")
                 return {
                     "success": False,
                     "message": "Invalid request payload",
                     "data": {},
-                    "error": {
-                        "code": 400,
-                        "message": "Missing required fields: channel_id, message, or filename"
-                    }
+                    "error": {"code": 400,
+                              "message": "Missing required fields: channel_id or message"},
                 }
 
             logger.info(f"Processing chat for channel: {channel_id}")
-
             user_input = message.strip()
 
-            session_data = load_session_from_redis(channel_id)
-
-            retriever, vectorstore = RAGUtilities().create_retriever(filename)
-
-            if retriever is None or vectorstore is None:
-                logger.error("Retriever or VectorStore not found")
+            utils = RAGUtilities()
+            vectorstore = utils.load_embeddings(channel_id)
+            if vectorstore is None:
+                logger.error(f"No embeddings for channel {channel_id}")
                 return {
                     "success": False,
-                    "message": "Document not found or embeddings not available",
+                    "message": "No documents found for this channel",
                     "data": {},
-                    "error": {
-                        "code": 404,
-                        "message": "Please upload the document first to generate embeddings"
-                    }
+                    "error": {"code": 404,
+                              "message": "Please upload a document first to generate embeddings"},
                 }
 
-            # Load or initialize chat history
-            chat_history = session_data.get(channel_id, ChatMessageHistory(messages=[])) if session_data else ChatMessageHistory(messages=[])
-            
-            session_dict = {channel_id: chat_history}
-            
-            conversational_chain = RAGUtilities().create_conversational_chain_history(
-                retriever,
-                session_dict,
-                filename
+            session_data = load_session_from_redis(channel_id)
+            chat_history = (
+                session_data.get(channel_id, ChatMessageHistory(messages=[]))
+                if session_data else ChatMessageHistory(messages=[])
             )
 
+            standalone_query = utils.contextualize_question(user_input, chat_history.messages)
+
+            retriever = HybridRetriever(channel_id, vectorstore)
+            docs = retriever.retrieve(standalone_query, filename=filename)
+            context = "\n\n".join(d.page_content for d in docs)
+
+            output = utils.answer(user_input, context, chat_history.messages, filename or channel_id)
+
             chat_history.messages.append(HumanMessage(content=user_input))
-
-            context = ""
-            relevant_docs = []
-
-            # Perform similarity search
-            results = vectorstore.similarity_search_with_score(user_input, k=2)
-
-            if results:
-                most_similar = min(results, key=itemgetter(1))
-                most_similar_doc, highest_score = most_similar
-                metadata = most_similar_doc.metadata
-                source = metadata.get("source", "Unknown")
-                relevant_docs.append(source)
-                context = most_similar_doc.page_content.replace("\n", " ")
-
-            input_data = {
-                "input": user_input,
-                "context": context,
-                "links": "",
-                "chat_history": chat_history.messages,
-            }
-
-            # Invoke the conversational chain
-            output = conversational_chain.invoke(
-                input_data,
-                config={"configurable": {"session_id": channel_id}},
-            )["answer"]
-
             chat_history.messages.append(AIMessage(content=output))
-
-            # Save the updated chat history back to Redis
             save_session_to_redis(channel_id, {channel_id: chat_history})
 
-            response_data = {
+            logger.info("Chat response generated successfully.")
+            return {
                 "success": True,
                 "message": "Response generated successfully",
-                "data": {
-                    "user_input": user_input,
-                    "bot_output": output,
-                },
+                "data": {"user_input": user_input, "bot_output": output},
                 "error": None,
             }
-
-            logger.info("Chat response generated successfully.")
-            return response_data
 
         except Exception as e:
             logger.error(f"Error in chat_with_document: {str(e)}")
@@ -179,8 +140,5 @@ class RAGController:
                 "success": False,
                 "message": "Internal server error during chat processing",
                 "data": {},
-                "error": {
-                    "code": 500,
-                    "message": str(e)
-                }
+                "error": {"code": 500, "message": str(e)},
             }
