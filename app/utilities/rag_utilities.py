@@ -281,3 +281,38 @@ class RAGUtilities:
         except Exception as e:
             logger.error(f"Error in create_qa_prompt: {str(e)}")
             raise e
+
+    def _contextualize_prompt(self) -> ChatPromptTemplate:
+        system_prompt = (
+            "Given a chat history and the latest user question which might reference context "
+            "in the chat history, reformulate it into a standalone question understandable "
+            "without the chat history. Do NOT answer it; only reformulate it if needed, "
+            "otherwise return it as is."
+        )
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+
+    def contextualize_question(self, message: str, history_messages: list) -> str:
+        """Rewrite a follow-up into a standalone question using chat history (LLM)."""
+        if not history_messages:
+            return message
+        try:
+            prompt = self._contextualize_prompt()
+            value = prompt.invoke({"chat_history": history_messages, "input": message})
+            return self.llm.invoke(value).content
+        except Exception as e:
+            logger.error(f"contextualize_question failed, using raw message: {e}")
+            return message
+
+    def answer(self, user_input: str, context: str, history_messages: list, filename: str) -> str:
+        """Generate a grounded answer from context + chat history (LLM)."""
+        prompt = self.create_qa_prompt(filename)
+        value = prompt.invoke(
+            {"context": context, "chat_history": history_messages, "input": user_input}
+        )
+        return self.llm.invoke(value).content
