@@ -1,6 +1,7 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from ..config.settings import settings
 from app.middleware.auth import require_api_key
+from app.middleware.rate_limit import limiter
 from ..controller.rag_controller import RAGController
 from ..config.logger import logger
 from app.repository.channel_repository import register_document
@@ -52,7 +53,8 @@ async def status():
 
 
 @router.post("/upload", dependencies=[Depends(require_api_key)])
-async def upload_file(channel_id: str = Form(...), file: UploadFile = File(...)):
+@limiter.limit(lambda: settings.RATE_LIMIT_UPLOAD)
+async def upload_file(request: Request, channel_id: str = Form(...), file: UploadFile = File(...)):
     """Upload a PDF/DOCX into a channel and generate embeddings."""
     if not file.filename:
         return create_error_response("No filename provided.", 400)
@@ -101,10 +103,11 @@ async def upload_file(channel_id: str = Form(...), file: UploadFile = File(...))
 
 
 @router.post("/chat", dependencies=[Depends(require_api_key)])
-async def chat(request: ChatRequest):
+@limiter.limit(lambda: settings.RATE_LIMIT_CHAT)
+async def chat(request: Request, body: ChatRequest):
     """API endpoint to handle RAG chat requests."""
     try:
-        request_dict = request.model_dump()
+        request_dict = body.model_dump()
         response = RAGController().chat_with_document(request=request_dict)
         return JSONResponse(content=response)
 

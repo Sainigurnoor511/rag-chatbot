@@ -3,6 +3,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.routes.rag_routes as routes_mod
+from app.middleware.rate_limit import limiter, rate_limit_handler
+from slowapi.errors import RateLimitExceeded
 
 
 @pytest.fixture
@@ -26,6 +28,8 @@ def client(monkeypatch, tmp_path):
 
     from fastapi import FastAPI
     app = FastAPI()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
     app.include_router(routes_mod.router)
     client = TestClient(app)
     client.registered = registered
@@ -33,11 +37,13 @@ def client(monkeypatch, tmp_path):
 
 
 def test_upload_requires_channel_id(client):
+    limiter.reset()
     resp = client.post("/upload", files={"file": ("a.pdf", b"%PDF-1.4", "application/pdf")})
     assert resp.status_code == 422  # missing channel_id form field
 
 
 def test_upload_registers_document(client):
+    limiter.reset()
     resp = client.post(
         "/upload",
         data={"channel_id": "chan-1"},

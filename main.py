@@ -59,6 +59,12 @@ app = FastAPI(
     lifespan=lifespan  # Use the lifespan handler
 )
 
+from slowapi.errors import RateLimitExceeded
+from app.middleware.rate_limit import limiter, rate_limit_handler
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
+
 # Include Routes
 app.include_router(router, prefix="/api/v1/rag-chatbot", tags=["RAG CHATBOT"])
 
