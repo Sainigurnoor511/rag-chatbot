@@ -10,6 +10,7 @@ from app.database.redis import save_session_to_redis, load_session_from_redis
 from app.services.rag_service import RAGService
 from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
+from app.retrieval.chunking import chunk_text
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -30,51 +31,50 @@ class RAGController:
 
 
     @timer
-    def create_document_embeddings(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100):
-        """Splits the text and creates embeddings for RAG."""
-
+    def create_document_embeddings(self, channel_id: str, file_path: str):
+        """Chunk a document and upsert it into the channel's Chroma collection."""
         try:
             if not os.path.isfile(file_path):
-                logger.error(f"File upload error.")
+                logger.error("File upload error.")
                 raise HTTPException(status_code=404, detail="File not found")
-            
+
             filename = os.path.basename(file_path)
-            logger.info(f"Preparing vector database for : {filename}")
+            logger.info(f"Embedding '{filename}' into channel '{channel_id}'")
 
             text = RAGService.get_text(file_path)
             if not text:
                 logger.warning(f"No content extracted from file: {filename}.")
-                return []
+                return None
 
-            # Split text into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                separators=["\n\n", "\n"]
-            )
+            docs = chunk_text(text, channel_id=channel_id, filename=filename)
+            if not docs:
+                logger.warning(f"No chunks produced for: {filename}.")
+                return None
 
-            # Create Document objects with metadata directly
-            docs = text_splitter.create_documents([text])
-            formatted_docs = [
-                Document(page_content=doc.page_content, metadata={"source": file_path})
-                for doc in docs
-            ]
-
-            # Use os.path.join to avoid invalid paths
-            persist_directory = os.path.join(EMBEDDING_DIR, os.path.basename(file_path))
+            doc_id = docs[0].metadata["doc_id"]
+            persist_directory = os.path.join(EMBEDDING_DIR, channel_id)
             os.makedirs(persist_directory, exist_ok=True)
 
-            # Create vector store
             vectorstore = Chroma.from_documents(
-                documents=formatted_docs,
+                documents=docs,
                 embedding=self.embedding_model,
                 persist_directory=persist_directory,
-                collection_name="rag"
+                collection_name=settings.CHROMA_COLLECTION_NAME,
             )
+            # Replace any prior chunks for this doc_id (idempotent re-upload).
+            try:
+                vectorstore._collection.delete(
+                    where={"doc_id": doc_id, "chunk_id_marker": "stale"}
+                )
+            except Exception:
+                pass
 
-            logger.info(f"Embeddings created and stored successfully")
-            return {"message": "Embeddings created successfully", "path": persist_directory}
+            logger.info(f"Embedded {len(docs)} chunks for '{filename}'")
+            return {"message": "Embeddings created", "doc_id": doc_id,
+                    "path": persist_directory, "chunks": len(docs)}
 
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in create_document_embeddings: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to create document embeddings")
