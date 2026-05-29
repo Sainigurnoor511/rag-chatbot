@@ -1,23 +1,14 @@
-import types
 import pytest
 
 import app.controller.rag_controller as ctrl_mod
 from app.controller.rag_controller import RAGController
 
 
-class _FakeChromaCollection:
-    def __init__(self):
-        self.deleted_filters = []
-
-    def delete(self, where=None):
-        self.deleted_filters.append(where)
-
-
 class _FakeVectorstore:
     last_kwargs = None
 
     def __init__(self):
-        self._collection = _FakeChromaCollection()
+        pass
 
     @classmethod
     def from_documents(cls, **kwargs):

@@ -55,7 +55,7 @@ class RAGController:
             persist_directory = os.path.join(EMBEDDING_DIR, channel_id)
             os.makedirs(persist_directory, exist_ok=True)
 
-            vectorstore = Chroma.from_documents(
+            Chroma.from_documents(
                 documents=docs,
                 embedding=self.embedding_model,
                 persist_directory=persist_directory,
