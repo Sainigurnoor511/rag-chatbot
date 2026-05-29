@@ -2,7 +2,8 @@ from fastapi import APIRouter, UploadFile, File
 from ..config.settings import settings
 from ..controller.rag_controller import RAGController
 from ..config.logger import logger
-from app.utilities.file_embeddings_handler import register_file 
+from app.repository.channel_repository import register_document
+from fastapi import Form
 import os
 import shutil
 from pydantic import BaseModel
@@ -52,60 +53,52 @@ async def status():
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """Uploads PDF or DOCX file via form-data and generates embeddings."""
-    
-    # Validate file
+async def upload_file(channel_id: str = Form(...), file: UploadFile = File(...)):
+    """Upload a PDF/DOCX into a channel and generate embeddings."""
     if not file.filename:
         return create_error_response("No filename provided.", 400)
-    
+
     if not file.filename.endswith((".pdf", ".docx")):
         return create_error_response("Unsupported file format. Use PDF or DOCX.", 400)
-    
-    # Check file size (limit to 50MB)
+
     if file.size and file.size > 50 * 1024 * 1024:
         return create_error_response("File too large. Maximum size is 50MB.", 400)
 
-    # Ensure upload directory exists
     os.makedirs(PROJECT_UPLOAD_DIRECTORY, exist_ok=True)
-    os.makedirs(PROJECT_EMBEDDING_DIRECTORY, exist_ok=True)
-
-    session_id = str(uuid4())
     file_path = os.path.join(PROJECT_UPLOAD_DIRECTORY, file.filename)
-    embedding_path = os.path.join(PROJECT_EMBEDDING_DIRECTORY, file.filename)
 
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     try:
-        result = RAGController().create_document_embeddings(file_path=file_path)
-
+        result = RAGController().create_document_embeddings(
+            channel_id=channel_id, file_path=file_path
+        )
         if result is None:
-            # Clean up uploaded file if embedding creation fails
             if os.path.exists(file_path):
                 os.remove(file_path)
             return create_error_response("Failed to generate embeddings.", 500)
 
-        register_file(session_id, file_path, embedding_path)
+        register_document(channel_id, result["doc_id"], file.filename)
 
         return {
             "success": True,
             "message": "File uploaded and embeddings created successfully",
             "data": {
-                "session_id": session_id,
+                "channel_id": channel_id,
                 "file_name": file.filename,
-                # "file_path": file_path,
-                # "embedding_path": embedding_path
+                "doc_id": result["doc_id"],
+                "chunks": result.get("chunks"),
             },
-            "error": None
+            "error": None,
         }
-
     except Exception as e:
         logger.error(f"Unexpected error during file upload: {str(e)}")
-        # Clean up uploaded file on unexpected error
         if os.path.exists(file_path):
             os.remove(file_path)
-        return create_error_response("Internal server error during file processing", 500, {"details": str(e)})
+        return create_error_response(
+            "Internal server error during file processing", 500, {"details": str(e)}
+        )
 
 
 @router.post("/chat")
