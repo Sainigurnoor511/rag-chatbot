@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     RERANK_TOP_N: int = 5
     RERANKER_MODEL: str = "BAAI/bge-reranker-base"
 
+    # Production cross-cutting (Phase 3)
+    API_KEYS: str = ""  # comma-separated; empty disables auth (dev)
+    RATE_LIMIT_CHAT: str = "30/minute"
+    RATE_LIMIT_UPLOAD: str = "10/minute"
+    ENABLE_QUERY_CACHE: bool = False
+    QUERY_CACHE_TTL: int = 300
+    METRICS_ENABLED: bool = True
+
+    def api_keys_list(self) -> list[str]:
+        return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
