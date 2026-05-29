@@ -27,7 +27,15 @@ class Settings(BaseSettings):
 
     # Model Configuration
     FAST_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
-    
+
+    # Chunking
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 150
+
+    # Per-channel storage
+    CHROMA_COLLECTION_NAME: str = "rag_channel"
+    CHANNEL_TTL_SECONDS: int = 1800  # 30 minutes
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
