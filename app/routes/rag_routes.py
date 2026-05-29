@@ -29,7 +29,7 @@ def create_error_response(message: str, error_code: int = 500, details: dict = N
 router = APIRouter()
 
 PROJECT_NAME = settings.PROJECT_NAME
-PROJECT_VERSION = settings.VERSION,
+PROJECT_VERSION = settings.VERSION
 PROJECT_ENVIRONMENT = settings.ENVIRONMENT
 PROJECT_UPLOAD_DIRECTORY = settings.UPLOAD_DIR
 PROJECT_EMBEDDING_DIRECTORY = settings.EMBEDDING_DIR

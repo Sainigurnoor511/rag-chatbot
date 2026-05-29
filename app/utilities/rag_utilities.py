@@ -9,14 +9,6 @@ from app.utilities.optimum_embeddings import OptimumEmbeddingWrapper, FastEmbedW
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain.chains import (
-    create_retrieval_chain,
-    create_history_aware_retriever,
-)
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastembed import TextEmbedding
 
 
@@ -26,9 +18,6 @@ EMBEDDING_DIR = settings.EMBEDDING_DIR
 
 # Cache to hold loaded vector stores
 VECTOR_STORE_CACHE = {}
-
-# In-memory session storage
-SESSION_HISTORY = {}    
 
 # Store the global RAG instance
 rag_utilities = None
@@ -94,49 +83,6 @@ class RAGUtilities:
         return self.embedding_model
 
 
-    def create_retriever(self, channel_id: str):
-        """Create retriever from the channel's embeddings."""
-        try:
-            # logger.info(f"Creating retriever for: {channel_id}")
-
-            vectorstore = self.load_embeddings(channel_id)
-
-            if vectorstore is None:
-                logger.error(f"Vector store not found for channel: {channel_id}")
-                return None, None
-
-            # logger.debug(f"Retriever created successfully for {channel_id}")
-            return vectorstore.as_retriever(), vectorstore
-
-        except Exception as e:
-            logger.error(f"Error in create_retriever: {str(e)}")
-            return None, None
-
-
-    def create_conversational_chain_history(self, retriever, store, filename) -> RunnableWithMessageHistory:
-        """Creates conversational chain with message history."""
-        try:
-            # logger.info(f"Creating conversational chain for: {filename}")
-
-            history_aware_retriever = self.create_contextualize_question_prompt(self.llm, retriever)
-            question_answer_chain = self.create_question_answer_chain(self.llm, filename)
-            rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-            # logger.debug("Conversational chain created successfully.")
-
-            return RunnableWithMessageHistory(
-                rag_chain,
-                lambda session_id: self.get_session_history(session_id, store),
-                input_messages_key="input",
-                history_messages_key="chat_history",
-                output_messages_key="answer",
-            )
-
-        except Exception as e:
-            logger.error(f"Error in create_conversational_chain_history: {str(e)}")
-            raise e
-
-
     def load_embeddings(self, channel_id: str):
         """Load a channel's embeddings vector store, with caching."""
         try:
@@ -166,80 +112,6 @@ class RAGUtilities:
         except Exception as e:
             logger.error(f"Error in load_embeddings: {str(e)}")
             return None
-
-
-    def create_question_answer_chain(self, llm, filename):
-        """Create QA chain using the document filename in the prompt."""
-        try:
-            # logger.info(f"Creating QA chain for: {filename}")
-            
-            qa_prompt = self.create_qa_prompt(filename)
-            qa_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-            # logger.debug("QA chain created successfully.")
-            return qa_chain
-
-        except Exception as e:
-            logger.error(f"Error in create_question_answer_chain: {str(e)}")
-            raise e
-
-
-    def create_contextualize_question_prompt(self, llm, retriever):
-        """Creates contextualized question prompt."""
-        try:
-            # logger.info("Creating contextualized question prompt...")
-
-            system_prompt = ("""
-                You are an expert **contextual question reformulator**.
-                Your task is to **rewrite the latest user question into a standalone, clear, and concise form**
-                that can be understood without the chat history.
-
-                **Instructions:**
-                1. **If the question is already self-contained**, return it as is.
-                2. **Clarify ambiguous or unclear questions** by adding missing context.
-                3. **Do not alter the meaning, tone, or intent** of the original question.
-                4. **Do not add or remove information** that changes the context or purpose.
-                5. **Do not speculate or introduce external content**.
-
-                **Constraints:**
-                - Only **reformat the question** for clarity and independence.
-                - If the question is clear on its own, keep it unchanged.
-                - Maintain the original **question's accuracy and intent**.
-            """)
-            
-            contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system_prompt),
-                    MessagesPlaceholder("chat_history"),
-                    ("human", "{input}")
-                ]
-            )
-
-            contextual_retriever = create_history_aware_retriever(
-                llm, retriever, contextualize_q_prompt
-            )
-
-            # logger.debug("Contextualized question prompt created successfully.")
-            return contextual_retriever
-
-        except Exception as e:
-            logger.error(f"Error in create_contextualize_question_prompt: {str(e)}")
-            raise e
-
-
-    def get_session_history(self, session_id: str, store: dict) -> BaseChatMessageHistory:
-        """Retrieve or create a new chat message history for the given session ID."""
-        try:
-            if session_id not in store:
-                # logger.info(f"Creating new session history for: {session_id}")
-                store[session_id] = ChatMessageHistory()
-
-            # logger.debug(f"Session history retrieved for: {session_id}")
-            return store[session_id]
-
-        except Exception as e:
-            logger.error(f"Error in get_session_history: {str(e)}")
-            raise e
 
 
     def create_qa_prompt(self, filename) -> ChatPromptTemplate:
