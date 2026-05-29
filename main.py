@@ -1,4 +1,5 @@
 import os
+import asyncio
 import uvicorn
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
@@ -29,6 +30,9 @@ async def lifespan(app: FastAPI):
         logger.info("Directories created successfully")
 
         rag_utilities = RAGUtilities()  # Load the model once
+
+        from app.repository.channel_sweeper import sweep_loop
+        asyncio.create_task(sweep_loop())
 
         yield  # Yield control to the app
 

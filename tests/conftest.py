@@ -15,4 +15,9 @@ def fake_redis(monkeypatch):
         monkeypatch.setattr(qcache, "redis_client", client, raising=False)
     except Exception:
         pass
+    try:
+        import app.repository.channel_sweeper as csweeper
+        monkeypatch.setattr(csweeper, "redis_client", client, raising=False)
+    except Exception:
+        pass
     return client
