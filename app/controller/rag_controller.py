@@ -11,6 +11,7 @@ from app.services.rag_service import RAGService
 from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
 from app.retrieval.chunking import chunk_text
+from app.retrieval import bm25_index
 
 from langchain_chroma import Chroma
 from langchain_core.messages import AIMessage, HumanMessage
@@ -59,6 +60,8 @@ class RAGController:
                 persist_directory=persist_directory,
                 collection_name=settings.CHROMA_COLLECTION_NAME,
             )
+
+            bm25_index.add_documents(channel_id, docs)
 
             logger.info(f"Embedded {len(docs)} chunks for '{filename}'")
             return {"message": "Embeddings created", "doc_id": doc_id,
