@@ -37,23 +37,30 @@ OptimumEmbedding.create_and_save_optimum_model("BAAI/bge-base-en-v1.5", "app/mod
 
 Layered FastAPI app under `app/`, wired together in `main.py`:
 
-- **`routes/rag_routes.py`** — HTTP layer. Endpoints (all under prefix `/api/v1/rag-chatbot`): `GET /status`, `POST /upload` (multipart file), `POST /chat` (JSON `{channel_id, message, filename}`), `GET /sentry-debug`. Validates uploads (PDF/DOCX only, ≤50MB), defines the standardized JSON envelope (`success`/`message`/`data`/`error`) via `create_error_response`.
-- **`controller/rag_controller.py`** — orchestration. `create_document_embeddings` chunks text and builds the Chroma store; `chat_with_document` loads Redis history, builds the retrieval chain, runs a manual similarity search to attach context, invokes the chain, and saves history back.
+> **Production upgrade in progress.** This codebase is being upgraded from naive single-document RAG to a per-channel multi-document, hybrid-retrieval system. The design spec is at `docs/superpowers/specs/2026-05-29-production-rag-design.md` and phased plans under `docs/superpowers/plans/`. **Phase 1 (per-channel storage foundation) is complete**; Phases 2–4 (hybrid BM25+dense retrieval & cross-encoder rerank; production cross-cutting; eval harness) are not yet built. The notes below reflect the post-Phase-1 state.
+
+- **`routes/rag_routes.py`** — HTTP layer. Endpoints (all under prefix `/api/v1/rag-chatbot`): `GET /status`, `POST /upload` (multipart: `channel_id` form field + `file`), `POST /chat` (JSON `{channel_id, message, filename}`), `GET /sentry-debug`. Validates uploads (PDF/DOCX only, ≤50MB), defines the standardized JSON envelope (`success`/`message`/`data`/`error`) via `create_error_response`. On upload it registers the doc in the Redis channel manifest.
+- **`controller/rag_controller.py`** — orchestration. `create_document_embeddings(channel_id, file_path)` chunks text (via `retrieval/chunking.py`) and upserts it into the channel's Chroma collection. `chat_with_document` is **still the old single-file flow** (loads Redis history, manual similarity search, builds the chain) — it is rewritten in Phase 2, so end-to-end chat is not yet consistent with the per-channel model.
 - **`services/rag_service.py`** — pure text extraction from TXT/PDF (PyMuPDF/`fitz`) / DOCX (`python-docx`). Stateless static methods.
-- **`utilities/rag_utilities.py`** — the RAG engine. `RAGUtilities` builds the LangChain history-aware retrieval chain (contextualize-question prompt + stuff-documents QA chain), manages the embedding model and LLM, and loads/caches vector stores. Holds the QA system prompts (answers are constrained strictly to the uploaded document).
+- **`retrieval/chunking.py`** — `chunk_text()` splits text into LangChain `Document`s tagged with `{channel_id, source, doc_id, chunk_id}`; `compute_doc_id()` gives a stable filename-derived id so re-uploads can replace (idempotent replace itself lands in Phase 2). (`retrieval/` is where Phase 2's hybrid retriever, BM25 index, and reranker will live.)
+- **`repository/channel_repository.py`** — Redis-backed manifest of which documents belong to a channel (`channel:{id}:docs` hash, TTL `CHANNEL_TTL_SECONDS`). `register_document` / `list_documents` / `remove_channel`. Worker-shared and restart-survivable.
+- **`utilities/rag_utilities.py`** — the RAG engine. `RAGUtilities` builds the LangChain history-aware retrieval chain (contextualize-question prompt + stuff-documents QA chain), manages the embedding model and LLM, and loads/caches per-channel vector stores (`load_embeddings(channel_id)`, `create_retriever(channel_id)`). Holds the QA system prompts.
 - **`utilities/optimum_embeddings.py`** — `OptimumEmbeddingWrapper` (local ONNX) and `FastEmbedWrapper` (fallback), both adapting their backend to LangChain's `embed_documents`/`embed_query` interface so Chroma can use them.
-- **`utilities/file_embeddings_handler.py`** — in-memory `SESSION_FILES` registry + `cleanup_expired_files` background task (launched in the lifespan) that deletes uploads and embedding folders 30 minutes after registration.
-- **`database/redis.py`** — session persistence. Serializes chat history with `dill` (`save`/`load`/`delete_session_to_redis`), 20-minute TTL.
-- **`config/settings.py`** — pydantic-settings `Settings` singleton (`settings`), all paths resolved relative to `BASE_DIR`. **`config/logger.py`** — preconfigured loguru `logger` (console + rotating `logs/app.log`); import this, not loguru directly.
+- **`database/redis.py`** — chat-history persistence. Serializes history with `dill` (`save`/`load`/`delete_session_to_redis`), 20-minute TTL. Exposes module-level `redis_client` (may be `None` if Redis is unreachable; callers guard for this).
+- **`config/settings.py`** — pydantic-settings `Settings` singleton (`settings`), all paths relative to `BASE_DIR`. Phase-1 knobs: `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHROMA_COLLECTION_NAME`, `CHANNEL_TTL_SECONDS`. **`config/logger.py`** — preconfigured loguru `logger`; import this, not loguru directly.
 
 ### Key design points and gotchas
 
-- **Per-document vector stores.** Each uploaded file gets its own Chroma persist directory at `data/database/<filename>/`. The `filename` field in a chat request must match the uploaded filename for retrieval to find the store. Uploads live in `data/uploads/`.
-- **Collection-name mismatch (latent bug).** `create_document_embeddings` writes Chroma with `collection_name="rag"`, but `load_embeddings` reads with `collection_name=f"{filename}_collection"`. Be aware of this if retrieval returns empty results.
-- **Caching is process-global and stateful.** `RAGUtilities` caches the LLM and embedding model at the class level (`_llm_instance`, `_model_instance`); `VECTOR_STORE_CACHE` and `SESSION_HISTORY` are module-level dicts. State does not survive restarts and is not shared across the 2 uvicorn workers — each worker has its own caches and its own `SESSION_FILES`.
-- **Two parallel session-expiry mechanisms:** Redis TTL (20 min, for chat history) and the in-memory cleanup task (30 min, for files/embeddings on disk). They are independent.
-- **Singleton via repeated instantiation.** Code calls `RAGUtilities()` / `RAGController()` freely — the class-level caches make this cheap, but constructors still run.
+- **Per-channel vector stores.** Each `channel_id` gets one Chroma collection at `data/database/<channel_id>/` (uploads land in `data/uploads/`) holding chunks from all its documents, written and read with the single consistent `collection_name = settings.CHROMA_COLLECTION_NAME` (`"rag_channel"`). The earlier write/read collection-name mismatch bug is **fixed**. Note: `chat_with_document` still passes the request's `filename` where a `channel_id` is expected — a Phase-2 leftover to reconcile.
+- **Channel document manifest in Redis.** `repository/channel_repository.py` is the source of truth for channel→docs, replacing the former in-memory `SESSION_FILES` dict (which wasn't shared across the 2 uvicorn workers). Expiry rides the manifest's Redis TTL; on-disk cleanup of expired channel dirs is deferred to Phase 3.
+- **Caching is process-global and stateful.** `RAGUtilities` caches the LLM and embedding model at the class level (`_llm_instance`, `_model_instance`); `VECTOR_STORE_CACHE` and `SESSION_HISTORY` are module-level dicts. Not shared across workers and not restart-surviving.
+- **Re-upload duplicates chunks** for now — stable `doc_id` exists but delete-before-insert is a Phase-2 item.
+- **Singleton via repeated instantiation.** Code calls `RAGUtilities()` / `RAGController()` freely — class-level caches make this cheap, but constructors still run.
 - **Sentry** is initialized in `main.py` with a hardcoded DSN; `GET /sentry-debug` deliberately raises a `ZeroDivisionError` to test it.
+
+### Testing
+
+`pytest` (+ `fakeredis`) is set up; run the suite with `.venv\Scripts\python.exe -m pytest`. Tests live in `tests/` and follow TDD per the phase plans. Note: the project venv is uv-managed — if `python` errors with a missing interpreter path, run `uv python install 3.11.11` to restore it.
 
 ## Conventions
 

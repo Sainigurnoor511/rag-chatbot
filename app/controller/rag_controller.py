@@ -12,9 +12,7 @@ from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
 from app.retrieval.chunking import chunk_text
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain.schema import Document
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 

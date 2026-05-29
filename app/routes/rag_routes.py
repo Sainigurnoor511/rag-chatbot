@@ -8,7 +8,6 @@ import os
 import shutil
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
-from uuid import uuid4
 
 def create_error_response(message: str, error_code: int = 500, details: dict = None):
     """Create a standardized error response."""
