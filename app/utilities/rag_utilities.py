@@ -94,18 +94,18 @@ class RAGUtilities:
         return self.embedding_model
 
 
-    def create_retriever(self, filename: str):
-        """Create retriever from the document's embeddings."""
+    def create_retriever(self, channel_id: str):
+        """Create retriever from the channel's embeddings."""
         try:
-            # logger.info(f"Creating retriever for: {filename}")
-            
-            vectorstore = self.load_embeddings(filename)
+            # logger.info(f"Creating retriever for: {channel_id}")
+
+            vectorstore = self.load_embeddings(channel_id)
 
             if vectorstore is None:
-                logger.error(f"Vector store not found for file: {filename}")
+                logger.error(f"Vector store not found for channel: {channel_id}")
                 return None, None
 
-            # logger.debug(f"Retriever created successfully for {filename}")
+            # logger.debug(f"Retriever created successfully for {channel_id}")
             return vectorstore.as_retriever(), vectorstore
 
         except Exception as e:
@@ -137,31 +137,30 @@ class RAGUtilities:
             raise e
 
 
-    def load_embeddings(self, filename: str):
-        """Load embeddings from the specified document filename with caching."""
+    def load_embeddings(self, channel_id: str):
+        """Load a channel's embeddings vector store, with caching."""
         try:
-            persist_directory = os.path.join(EMBEDDING_DIR, filename)
+            persist_directory = os.path.join(EMBEDDING_DIR, channel_id)
             os.makedirs(persist_directory, exist_ok=True)
 
             # Use cached vector store if it exists
-            if filename in VECTOR_STORE_CACHE:
-                logger.info(f"Using cached vector store for {filename}")
-                return VECTOR_STORE_CACHE[filename]
+            if channel_id in VECTOR_STORE_CACHE:
+                logger.info(f"Using cached vector store for {channel_id}")
+                return VECTOR_STORE_CACHE[channel_id]
 
             if not os.path.exists(persist_directory) or not os.listdir(persist_directory):
-                logger.warning(f"No embeddings found for {filename}")
+                logger.warning(f"No embeddings found for {channel_id}")
                 return None
 
             logger.info(f"Loading embeddings from {persist_directory}")
 
-            # Load and cache the vector store
             vectorstore = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=persist_directory,
-                collection_name=f"{filename}_collection"
+                collection_name=settings.CHROMA_COLLECTION_NAME,
             )
 
-            VECTOR_STORE_CACHE[filename] = vectorstore
+            VECTOR_STORE_CACHE[channel_id] = vectorstore
             return vectorstore
 
         except Exception as e:
