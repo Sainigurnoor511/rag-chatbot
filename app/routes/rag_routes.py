@@ -1,5 +1,6 @@
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from ..config.settings import settings
+from app.middleware.auth import require_api_key
 from ..controller.rag_controller import RAGController
 from ..config.logger import logger
 from app.repository.channel_repository import register_document
@@ -50,7 +51,7 @@ async def status():
 
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(require_api_key)])
 async def upload_file(channel_id: str = Form(...), file: UploadFile = File(...)):
     """Upload a PDF/DOCX into a channel and generate embeddings."""
     if not file.filename:
@@ -99,7 +100,7 @@ async def upload_file(channel_id: str = Form(...), file: UploadFile = File(...))
         )
 
 
-@router.post("/chat")
+@router.post("/chat", dependencies=[Depends(require_api_key)])
 async def chat(request: ChatRequest):
     """API endpoint to handle RAG chat requests."""
     try:
@@ -113,5 +114,7 @@ async def chat(request: ChatRequest):
 
 @router.get("/sentry-debug")
 async def trigger_error():
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
     division_by_zero = 1 / 0
     return division_by_zero
