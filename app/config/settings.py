@@ -20,13 +20,13 @@ class Settings(BaseSettings):
     # Correctly resolved paths
     UPLOAD_DIR: str = str(BASE_DIR / "data" / "uploads" )
     EMBEDDING_DIR: str = str(BASE_DIR / "data" / "database" )
-    LOCAL_EMBEDDING_MODEL: str = str(BASE_DIR / "app" / "models" / "bge-base-en-v1.5_ONNX" )
+    LOCAL_EMBEDDING_MODEL: str = str(BASE_DIR / "app" / "models" / "bge-large-en-v1.5_ONNX" )
 
     # Logs directory
     LOG_DIR: str = str(BASE_DIR / "logs")
 
     # Model Configuration
-    FAST_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
+    FAST_EMBEDDING_MODEL: str = "BAAI/bge-large-en-v1.5"
 
     # Chunking
     CHUNK_SIZE: int = 1000
@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     ENABLE_QUERY_CACHE: bool = False
     QUERY_CACHE_TTL: int = 300
     METRICS_ENABLED: bool = True
+
+    # Ingestion: crawling + vision captioning (Phase 5)
+    GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    CRAWL_MAX_PAGES: int = 200
+    CRAWL_MAX_DEPTH: int = 5
+    CRAWL_JOB_TTL_SECONDS: int = 3600
 
     def api_keys_list(self) -> list[str]:
         return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]
