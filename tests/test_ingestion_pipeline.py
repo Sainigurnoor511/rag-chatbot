@@ -92,3 +92,39 @@ def test_run_crawl_job_skips_page_on_parse_failure_but_continues():
     assert mock_bm25.add_documents.call_count == 1
     status_calls = [c.kwargs.get("status") for c in mock_update_job.call_args_list if "status" in c.kwargs]
     assert "done" in status_calls
+
+
+def test_run_crawl_job_html_page_gets_table_and_figure_via_docling():
+    from app.ingestion.parser import ParsedDocument, ExtractedFigure
+
+    fake_pages = [CrawledPage(url="https://example.com/docs/report", html="<html>...</html>")]
+
+    real_parsed = ParsedDocument(
+        text_blocks=["Quarterly report."],
+        tables=["| Q1 | Q2 |\n|----|----|\n| 10 | 20 |"],
+        figures=[ExtractedFigure(image_bytes=b"chart-bytes", position_hint="fig1")],
+    )
+
+    with patch("app.ingestion.pipeline.crawl_site", return_value=fake_pages), \
+         patch("app.ingestion.pipeline.parse_document", return_value=real_parsed), \
+         patch("app.ingestion.parser.caption_figure", return_value="Revenue grew from 10 to 20."), \
+         patch("app.ingestion.pipeline.Chroma") as MockChroma, \
+         patch("app.ingestion.pipeline.bm25_index") as mock_bm25, \
+         patch("app.ingestion.pipeline.register_document"), \
+         patch("app.ingestion.pipeline.update_job"):
+
+        run_crawl_job(
+            job_id="job4",
+            channel_id="chan1",
+            base_url="https://example.com",
+            include_paths=["/docs"],
+            max_pages=50,
+            max_depth=3,
+            embedding_model=MagicMock(),
+        )
+
+    call_kwargs = MockChroma.from_documents.call_args.kwargs
+    embedded_texts = [d.page_content for d in call_kwargs["documents"]]
+    combined = "\n".join(embedded_texts)
+    assert "Q1 | Q2" in combined
+    assert "Revenue grew from 10 to 20." in combined
