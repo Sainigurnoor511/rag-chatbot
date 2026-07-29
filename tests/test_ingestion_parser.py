@@ -56,16 +56,35 @@ def test_parse_pdf_extracts_text_tables_and_figures():
     assert parsed.figures[0].image_bytes == b"fake-png-bytes"
 
 
-def test_parsed_document_to_text_stream_includes_all_parts():
-    parsed = ParsedDocument(
-        text_blocks=["Hello world."],
-        tables=["| x |\n|---|\n| 1 |"],
-        figures=[ExtractedFigure(image_bytes=b"abc", position_hint="page1")],
-    )
-    stream = parsed.to_text_stream()
+def test_parsed_document_to_text_stream_includes_captions():
+    with patch("app.ingestion.parser.caption_figure") as mock_caption:
+        mock_caption.return_value = "A flowchart of the onboarding process."
+
+        parsed = ParsedDocument(
+            text_blocks=["Hello world."],
+            tables=["| x |\n|---|\n| 1 |"],
+            figures=[ExtractedFigure(image_bytes=b"abc", position_hint="page1")],
+        )
+        stream = parsed.to_text_stream()
+
     assert "Hello world." in stream
     assert "| x |" in stream
-    assert "[[FIGURE:0]]" in stream
+    assert "[Figure: A flowchart of the onboarding process.]" in stream
+
+
+def test_parsed_document_to_text_stream_skips_empty_captions():
+    with patch("app.ingestion.parser.caption_figure") as mock_caption:
+        mock_caption.return_value = ""
+
+        parsed = ParsedDocument(
+            text_blocks=["Hello world."],
+            tables=[],
+            figures=[ExtractedFigure(image_bytes=b"abc", position_hint="page1")],
+        )
+        stream = parsed.to_text_stream()
+
+    assert "Hello world." in stream
+    assert "[Figure:" not in stream
 
 
 def test_parse_document_empty_source_returns_empty_parsed_document():

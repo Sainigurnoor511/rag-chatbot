@@ -5,6 +5,7 @@ from typing import Literal
 from docling.document_converter import DocumentConverter
 
 from app.config.logger import logger
+from app.ingestion.captioning import caption_figure
 
 
 @dataclass
@@ -21,8 +22,10 @@ class ParsedDocument:
 
     def to_text_stream(self) -> str:
         parts = list(self.text_blocks) + list(self.tables)
-        for i in range(len(self.figures)):
-            parts.append(f"[[FIGURE:{i}]]")
+        for figure in self.figures:
+            caption = caption_figure(figure.image_bytes)
+            if caption:
+                parts.append(f"[Figure: {caption}]")
         return "\n\n".join(parts)
 
 
