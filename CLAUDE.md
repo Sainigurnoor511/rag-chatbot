@@ -24,14 +24,18 @@ There is no test runner, linter, or build step. The `test/` directory holds expl
 
 ### Generating the local ONNX embedding model
 
-The preferred embedding path expects an ONNX model at `app/models/bge-base-en-v1.5_ONNX`, which is **not** in the repo. Create it once with:
+The preferred embedding path expects an ONNX model at `app/models/bge-large-en-v1.5_ONNX` (1024-dim), which is **not** in the repo. Create it once with:
 
 ```python
-from llama_index.embeddings.huggingface_optimum import OptimumEmbedding
-OptimumEmbedding.create_and_save_optimum_model("BAAI/bge-base-en-v1.5", "app/models/bge-base-en-v1.5_ONNX")
+from optimum.onnxruntime import ORTModelForFeatureExtraction
+from transformers import AutoTokenizer
+model = ORTModelForFeatureExtraction.from_pretrained("BAAI/bge-large-en-v1.5", export=True)
+tok = AutoTokenizer.from_pretrained("BAAI/bge-large-en-v1.5")
+model.save_pretrained("app/models/bge-large-en-v1.5_ONNX")
+tok.save_pretrained("app/models/bge-large-en-v1.5_ONNX")
 ```
 
-(See `test/local_model.ipynb`.) If this model is missing or fails to load, the app automatically falls back to FastEmbed's `BAAI/bge-base-en-v1.5` on the CUDA execution provider — so a GPU + CUDA is effectively assumed.
+`OptimumEmbeddingWrapper` (`app/utilities/optimum_embeddings.py`) loads this directly via `optimum`+`transformers` — no llama_index dependency (removing it cut ~6s off process startup import time). If this model is missing or fails to load, the app automatically falls back to FastEmbed's `BAAI/bge-large-en-v1.5` on the CUDA execution provider — so a GPU + CUDA is effectively assumed. Changing the embedding model/dimension requires clearing existing per-channel Chroma stores under `data/database/` (dimension mismatch breaks old collections).
 
 ## Architecture
 
@@ -41,7 +45,7 @@ Layered FastAPI app under `app/`, wired together in `main.py`:
 
 - **`routes/rag_routes.py`** — HTTP layer. Endpoints (all under prefix `/api/v1/rag-chatbot`): `GET /status` (open), `POST /upload` (multipart: `channel_id` form field + `file`), `POST /chat` (JSON `{channel_id, message, filename?}`), `GET /sentry-debug` (raises 404 in production). `/upload` and `/chat` carry `Depends(require_api_key)` + a slowapi rate-limit decorator and take a `request: Request` param (slowapi requires it). Standardized JSON envelope (`success`/`message`/`data`/`error`) via `create_error_response`. On upload it registers the doc in the Redis channel manifest.
 - **`controller/rag_controller.py`** — orchestration. `create_document_embeddings(channel_id, file_path)` chunks text and **dual-writes**: upserts into the channel's Chroma collection AND appends to the channel BM25 index. `chat_with_document` is the explicit hybrid flow: validate → `load_embeddings(channel_id)` (404 if none) → load Redis history → `contextualize_question` (LLM rewrite) → `HybridRetriever.retrieve` → if no docs, return a grounded fallback **without** calling the LLM → else `answer` (LLM) → append+save history → envelope.
-- **`services/rag_service.py`** — pure text extraction from TXT/PDF (PyMuPDF/`fitz`) / DOCX (`python-docx`). Stateless static methods.
+- **`services/rag_service.py`** — pure text extraction from TXT/PDF (PyMuPDF/`fitz`) / DOCX (`python-docx`). Stateless static methods. No longer used by the `/upload` path (superseded by `app.ingestion.parser.parse_document`, Phase 5) — still present/unremoved, may still be referenced elsewhere.
 - **`retrieval/`** — the retrieval engine. `chunking.py` (`chunk_text` → `Document`s tagged `{channel_id, source, doc_id, chunk_id}`, stable `compute_doc_id`); `bm25_index.py` (per-channel BM25 corpus persisted at `data/database/<channel_id>/bm25.pkl`; `add_documents` / `search`); `fusion.py` (`reciprocal_rank_fusion`, keyed on `chunk_id`); `reranker.py` (`CrossEncoderReranker`, lazy/class-cached `bge-reranker-base`); `hybrid_retriever.py` (`HybridRetriever(channel_id, vectorstore).retrieve(query, filename=None)` → dense+BM25 → RRF → rerank, dense errors degrade to sparse-only).
 - **`repository/channel_repository.py`** — Redis-backed manifest of which documents belong to a channel (`channel:{id}:docs` hash, TTL `CHANNEL_TTL_SECONDS`). `register_document` / `list_documents` / `remove_channel`. Worker-shared and restart-survivable.
 - **`utilities/rag_utilities.py`** — manages the embedding model + Groq LLM (class-cached), loads/caches per-channel Chroma stores (`load_embeddings(channel_id)`), and holds the chat helpers `contextualize_question(message, history)` and `answer(user_input, context, history, filename)` plus the prompt builders (`_contextualize_prompt`, `create_qa_prompt`).
@@ -64,10 +68,15 @@ Layered FastAPI app under `app/`, wired together in `main.py`:
 - **Sentry** is initialized in `main.py` with a hardcoded DSN; `GET /sentry-debug` deliberately raises a `ZeroDivisionError` to test it.
 
 - **`eval/`** — offline evaluation harness (Phase 4). `retrieval_metrics.py` (pure `hit_at_k`/`reciprocal_rank`/`summarize`); `golden_set.py` (generate/save/load a synthetic Q&A golden set via the LLM); `run_eval.py` (`compare_pipelines` naive dense-only vs hybrid, `format_report`/`write_report`, and `maybe_ragas_scores` which lazily imports RAGAS). **RAGAS deps are isolated in `requirements-eval.txt`, NOT the serving `requirements.txt`** (they would upgrade shared `langchain-core`/`dill`); install them in a separate venv to run answer-quality scoring. The serving test suite runs without RAGAS.
+- **`ingestion/`** — document parsing and web-crawl ingestion (Phase 5). `parser.py` (`parse_document(source, source_type)` via Docling — PDF/DOCX/HTML all go through one layout-aware pipeline: paragraphs, markdown tables, and figures; figures are captioned inline via `captioning.py`'s Groq vision call and folded into `ParsedDocument.to_text_stream()`); `captioning.py` (`caption_figure`, vision-capable Groq model per `settings.GROQ_VISION_MODEL`, never raises — returns `""` on failure); `crawler.py` (`crawl_site`, Scrapy same-domain crawl bounded by `CRAWL_MAX_PAGES`/`CRAWL_MAX_DEPTH`, optional `include_paths` prefix filter, runs in a subprocess since Scrapy's Twisted reactor can't share a process with uvicorn's asyncio loop); `pipeline.py` (`run_crawl_job`, the full crawl→parse→caption→chunk→embed flow, writing into the *same* Chroma collection + BM25 index as file uploads). Crawl job progress is tracked in Redis via `repository/crawl_jobs.py` (`create_job`/`update_job`/`get_job`), polled via `GET /crawl/{job_id}`.
+- File uploads (`POST /upload`) now parse PDF/DOCX via Docling (`app.ingestion.parser.parse_document`) instead of PyMuPDF/python-docx directly — tables and figures are preserved, not just plain text.
+- **Vector store is still Chroma in this phase.** Qdrant migration and porting this ingestion logic to `closeloop-backend` are explicitly deferred to future work (see `docs/superpowers/specs/2026-07-29-crawler-docling-ingestion-design.md`).
 
 ### Testing
 
-`pytest` (+ `fakeredis`) is set up; run the suite with `.venv\Scripts\python.exe -m pytest` (61 tests). Tests live in `tests/` and follow TDD per the phase plans. The reranker and LLM are always mocked in tests — no model downloads or network calls. Note: the project venv is uv-managed — if `python` errors with a missing interpreter path, run `uv python install 3.11.11` to restore it.
+`pytest` (+ `fakeredis`) is set up; run the suite with `.venv\Scripts\python.exe -m pytest` (23 tests). Tests live in `tests/` and follow TDD per the phase plans. The reranker and LLM are always mocked in tests — no model downloads or network calls. Note: the project venv is uv-managed — if `python` errors with a missing interpreter path, run `uv python install 3.11.11` to restore it.
+
+**Do not use Starlette's `TestClient` for route tests in this repo** — it hangs indefinitely here (confirmed via `faulthandler` stack dump: its thread-based blocking portal deadlocks against Sentry's global threading instrumentation, which patches `Thread.run`). Use `httpx.AsyncClient` with `httpx.ASGITransport(app=app)` directly instead (async test, `pytest.mark.anyio`) — see `tests/test_crawl_route.py` for the pattern.
 
 ## Conventions
 
