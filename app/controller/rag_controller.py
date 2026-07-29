@@ -1,6 +1,4 @@
 import os
-from operator import itemgetter
-from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import HTTPException
 
@@ -10,10 +8,12 @@ from app.database.redis import save_session_to_redis, load_session_from_redis
 from app.services.rag_service import RAGService
 from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
+from app.retrieval.chunking import chunk_text
+from app.retrieval import bm25_index
+from app.retrieval.hybrid_retriever import HybridRetriever
+from app.repository import query_cache
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain.schema import Document
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 
@@ -30,51 +30,45 @@ class RAGController:
 
 
     @timer
-    def create_document_embeddings(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100):
-        """Splits the text and creates embeddings for RAG."""
-
+    def create_document_embeddings(self, channel_id: str, file_path: str):
+        """Chunk a document and upsert it into the channel's Chroma collection."""
         try:
             if not os.path.isfile(file_path):
-                logger.error(f"File upload error.")
+                logger.error("File upload error.")
                 raise HTTPException(status_code=404, detail="File not found")
-            
+
             filename = os.path.basename(file_path)
-            logger.info(f"Preparing vector database for : {filename}")
+            logger.info(f"Embedding '{filename}' into channel '{channel_id}'")
 
             text = RAGService.get_text(file_path)
             if not text:
                 logger.warning(f"No content extracted from file: {filename}.")
-                return []
+                return None
 
-            # Split text into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                separators=["\n\n", "\n"]
-            )
+            docs = chunk_text(text, channel_id=channel_id, filename=filename)
+            if not docs:
+                logger.warning(f"No chunks produced for: {filename}.")
+                return None
 
-            # Create Document objects with metadata directly
-            docs = text_splitter.create_documents([text])
-            formatted_docs = [
-                Document(page_content=doc.page_content, metadata={"source": file_path})
-                for doc in docs
-            ]
-
-            # Use os.path.join to avoid invalid paths
-            persist_directory = os.path.join(EMBEDDING_DIR, os.path.basename(file_path))
+            doc_id = docs[0].metadata["doc_id"]
+            persist_directory = os.path.join(EMBEDDING_DIR, channel_id)
             os.makedirs(persist_directory, exist_ok=True)
 
-            # Create vector store
-            vectorstore = Chroma.from_documents(
-                documents=formatted_docs,
+            Chroma.from_documents(
+                documents=docs,
                 embedding=self.embedding_model,
                 persist_directory=persist_directory,
-                collection_name="rag"
+                collection_name=settings.CHROMA_COLLECTION_NAME,
             )
 
-            logger.info(f"Embeddings created and stored successfully")
-            return {"message": "Embeddings created successfully", "path": persist_directory}
+            bm25_index.add_documents(channel_id, docs)
 
+            logger.info(f"Embedded {len(docs)} chunks for '{filename}'")
+            return {"message": "Embeddings created", "doc_id": doc_id,
+                    "path": persist_directory, "chunks": len(docs)}
+
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error in create_document_embeddings: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to create document embeddings")
@@ -82,102 +76,84 @@ class RAGController:
 
     @timer
     def chat_with_document(self, request: dict):
-        """Handles the RAG chat flow."""
+        """Hybrid RAG chat: contextualize -> hybrid retrieve -> answer, with Redis history."""
         try:
-            # Input validation
             channel_id = request.get("channel_id")
             message = request.get("message")
-            filename = request.get("filename")
+            filename = request.get("filename")  # optional: restricts to one doc in the channel
 
-            if not channel_id or not message or not filename:
+            if not channel_id or not message:
                 logger.warning("Invalid request payload")
                 return {
                     "success": False,
                     "message": "Invalid request payload",
                     "data": {},
-                    "error": {
-                        "code": 400,
-                        "message": "Missing required fields: channel_id, message, or filename"
-                    }
+                    "error": {"code": 400,
+                              "message": "Missing required fields: channel_id or message"},
                 }
 
             logger.info(f"Processing chat for channel: {channel_id}")
-
             user_input = message.strip()
 
-            session_data = load_session_from_redis(channel_id)
-
-            retriever, vectorstore = RAGUtilities().create_retriever(filename)
-
-            if retriever is None or vectorstore is None:
-                logger.error("Retriever or VectorStore not found")
+            utils = RAGUtilities()
+            vectorstore = utils.load_embeddings(channel_id)
+            if vectorstore is None:
+                logger.error(f"No embeddings for channel {channel_id}")
                 return {
                     "success": False,
-                    "message": "Document not found or embeddings not available",
+                    "message": "No documents found for this channel",
                     "data": {},
-                    "error": {
-                        "code": 404,
-                        "message": "Please upload the document first to generate embeddings"
-                    }
+                    "error": {"code": 404,
+                              "message": "Please upload a document first to generate embeddings"},
                 }
 
-            # Load or initialize chat history
-            chat_history = session_data.get(channel_id, ChatMessageHistory(messages=[])) if session_data else ChatMessageHistory(messages=[])
-            
-            session_dict = {channel_id: chat_history}
-            
-            conversational_chain = RAGUtilities().create_conversational_chain_history(
-                retriever,
-                session_dict,
-                filename
+            if settings.ENABLE_QUERY_CACHE:
+                cached = query_cache.get_cached(channel_id, user_input, filename)
+                if cached is not None:
+                    logger.info(f"Query cache hit for channel {channel_id}")
+                    return {
+                        "success": True,
+                        "message": "Response generated successfully (cached)",
+                        "data": {"user_input": user_input, "bot_output": cached},
+                        "error": None,
+                    }
+
+            session_data = load_session_from_redis(channel_id)
+            chat_history = (
+                session_data.get(channel_id, ChatMessageHistory(messages=[]))
+                if session_data else ChatMessageHistory(messages=[])
             )
 
+            standalone_query = utils.contextualize_question(user_input, chat_history.messages)
+
+            retriever = HybridRetriever(channel_id, vectorstore)
+            docs = retriever.retrieve(standalone_query, filename=filename)
+            context = "\n\n".join(d.page_content for d in docs)
+
+            if not docs:
+                logger.warning(f"No relevant documents retrieved for channel {channel_id}")
+                output = ("I couldn't find relevant information in the uploaded "
+                          "documents to answer that question.")
+            else:
+                output = utils.answer(user_input, context, chat_history.messages,
+                                      filename or "the uploaded document(s)")
+
+            # Only cache grounded answers — never the "no relevant docs" fallback,
+            # which would go stale the moment a document is added to the channel.
+            if settings.ENABLE_QUERY_CACHE and docs:
+                query_cache.set_cached(channel_id, user_input, filename, output, settings.QUERY_CACHE_TTL)
+
             chat_history.messages.append(HumanMessage(content=user_input))
-
-            context = ""
-            relevant_docs = []
-
-            # Perform similarity search
-            results = vectorstore.similarity_search_with_score(user_input, k=2)
-
-            if results:
-                most_similar = min(results, key=itemgetter(1))
-                most_similar_doc, highest_score = most_similar
-                metadata = most_similar_doc.metadata
-                source = metadata.get("source", "Unknown")
-                relevant_docs.append(source)
-                context = most_similar_doc.page_content.replace("\n", " ")
-
-            input_data = {
-                "input": user_input,
-                "context": context,
-                "links": "",
-                "chat_history": chat_history.messages,
-            }
-
-            # Invoke the conversational chain
-            output = conversational_chain.invoke(
-                input_data,
-                config={"configurable": {"session_id": channel_id}},
-            )["answer"]
-
             chat_history.messages.append(AIMessage(content=output))
-
-            # Save the updated chat history back to Redis
             save_session_to_redis(channel_id, {channel_id: chat_history})
 
-            response_data = {
+            logger.info("Chat response generated successfully.")
+            return {
                 "success": True,
                 "message": "Response generated successfully",
-                "data": {
-                    "user_input": user_input,
-                    "bot_output": output,
-                },
+                "data": {"user_input": user_input, "bot_output": output},
                 "error": None,
             }
-
-            logger.info("Chat response generated successfully.")
-            return response_data
 
         except Exception as e:
             logger.error(f"Error in chat_with_document: {str(e)}")
@@ -185,8 +161,5 @@ class RAGController:
                 "success": False,
                 "message": "Internal server error during chat processing",
                 "data": {},
-                "error": {
-                    "code": 500,
-                    "message": str(e)
-                }
+                "error": {"code": 500, "message": str(e)},
             }

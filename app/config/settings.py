@@ -27,7 +27,33 @@ class Settings(BaseSettings):
 
     # Model Configuration
     FAST_EMBEDDING_MODEL: str = "BAAI/bge-base-en-v1.5"
-    
+
+    # Chunking
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 150
+
+    # Per-channel storage
+    CHROMA_COLLECTION_NAME: str = "rag_channel"
+    CHANNEL_TTL_SECONDS: int = 1800  # 30 minutes
+
+    # Hybrid retrieval (Phase 2)
+    DENSE_TOP_K: int = 20
+    BM25_TOP_K: int = 20
+    RRF_K: int = 60
+    RERANK_TOP_N: int = 5
+    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+
+    # Production cross-cutting (Phase 3)
+    API_KEYS: str = ""  # comma-separated; empty disables auth (dev)
+    RATE_LIMIT_CHAT: str = "30/minute"
+    RATE_LIMIT_UPLOAD: str = "10/minute"
+    ENABLE_QUERY_CACHE: bool = False
+    QUERY_CACHE_TTL: int = 300
+    METRICS_ENABLED: bool = True
+
+    def api_keys_list(self) -> list[str]:
+        return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

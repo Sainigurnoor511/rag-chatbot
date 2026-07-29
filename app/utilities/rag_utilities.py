@@ -9,14 +9,6 @@ from app.utilities.optimum_embeddings import OptimumEmbeddingWrapper, FastEmbedW
 from langchain_chroma import Chroma
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain.chains import (
-    create_retrieval_chain,
-    create_history_aware_retriever,
-)
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from fastembed import TextEmbedding
 
 
@@ -26,9 +18,6 @@ EMBEDDING_DIR = settings.EMBEDDING_DIR
 
 # Cache to hold loaded vector stores
 VECTOR_STORE_CACHE = {}
-
-# In-memory session storage
-SESSION_HISTORY = {}    
 
 # Store the global RAG instance
 rag_utilities = None
@@ -94,153 +83,35 @@ class RAGUtilities:
         return self.embedding_model
 
 
-    def create_retriever(self, filename: str):
-        """Create retriever from the document's embeddings."""
+    def load_embeddings(self, channel_id: str):
+        """Load a channel's embeddings vector store, with caching."""
         try:
-            # logger.info(f"Creating retriever for: {filename}")
-            
-            vectorstore = self.load_embeddings(filename)
-
-            if vectorstore is None:
-                logger.error(f"Vector store not found for file: {filename}")
-                return None, None
-
-            # logger.debug(f"Retriever created successfully for {filename}")
-            return vectorstore.as_retriever(), vectorstore
-
-        except Exception as e:
-            logger.error(f"Error in create_retriever: {str(e)}")
-            return None, None
-
-
-    def create_conversational_chain_history(self, retriever, store, filename) -> RunnableWithMessageHistory:
-        """Creates conversational chain with message history."""
-        try:
-            # logger.info(f"Creating conversational chain for: {filename}")
-
-            history_aware_retriever = self.create_contextualize_question_prompt(self.llm, retriever)
-            question_answer_chain = self.create_question_answer_chain(self.llm, filename)
-            rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-            # logger.debug("Conversational chain created successfully.")
-
-            return RunnableWithMessageHistory(
-                rag_chain,
-                lambda session_id: self.get_session_history(session_id, store),
-                input_messages_key="input",
-                history_messages_key="chat_history",
-                output_messages_key="answer",
-            )
-
-        except Exception as e:
-            logger.error(f"Error in create_conversational_chain_history: {str(e)}")
-            raise e
-
-
-    def load_embeddings(self, filename: str):
-        """Load embeddings from the specified document filename with caching."""
-        try:
-            persist_directory = os.path.join(EMBEDDING_DIR, filename)
+            persist_directory = os.path.join(EMBEDDING_DIR, channel_id)
             os.makedirs(persist_directory, exist_ok=True)
 
             # Use cached vector store if it exists
-            if filename in VECTOR_STORE_CACHE:
-                logger.info(f"Using cached vector store for {filename}")
-                return VECTOR_STORE_CACHE[filename]
+            if channel_id in VECTOR_STORE_CACHE:
+                logger.info(f"Using cached vector store for {channel_id}")
+                return VECTOR_STORE_CACHE[channel_id]
 
             if not os.path.exists(persist_directory) or not os.listdir(persist_directory):
-                logger.warning(f"No embeddings found for {filename}")
+                logger.warning(f"No embeddings found for {channel_id}")
                 return None
 
             logger.info(f"Loading embeddings from {persist_directory}")
 
-            # Load and cache the vector store
             vectorstore = Chroma(
                 embedding_function=self.embedding_model,
                 persist_directory=persist_directory,
-                collection_name=f"{filename}_collection"
+                collection_name=settings.CHROMA_COLLECTION_NAME,
             )
 
-            VECTOR_STORE_CACHE[filename] = vectorstore
+            VECTOR_STORE_CACHE[channel_id] = vectorstore
             return vectorstore
 
         except Exception as e:
             logger.error(f"Error in load_embeddings: {str(e)}")
             return None
-
-
-    def create_question_answer_chain(self, llm, filename):
-        """Create QA chain using the document filename in the prompt."""
-        try:
-            # logger.info(f"Creating QA chain for: {filename}")
-            
-            qa_prompt = self.create_qa_prompt(filename)
-            qa_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-            # logger.debug("QA chain created successfully.")
-            return qa_chain
-
-        except Exception as e:
-            logger.error(f"Error in create_question_answer_chain: {str(e)}")
-            raise e
-
-
-    def create_contextualize_question_prompt(self, llm, retriever):
-        """Creates contextualized question prompt."""
-        try:
-            # logger.info("Creating contextualized question prompt...")
-
-            system_prompt = ("""
-                You are an expert **contextual question reformulator**.
-                Your task is to **rewrite the latest user question into a standalone, clear, and concise form**
-                that can be understood without the chat history.
-
-                **Instructions:**
-                1. **If the question is already self-contained**, return it as is.
-                2. **Clarify ambiguous or unclear questions** by adding missing context.
-                3. **Do not alter the meaning, tone, or intent** of the original question.
-                4. **Do not add or remove information** that changes the context or purpose.
-                5. **Do not speculate or introduce external content**.
-
-                **Constraints:**
-                - Only **reformat the question** for clarity and independence.
-                - If the question is clear on its own, keep it unchanged.
-                - Maintain the original **question's accuracy and intent**.
-            """)
-            
-            contextualize_q_prompt = ChatPromptTemplate.from_messages(
-                [
-                    ("system", system_prompt),
-                    MessagesPlaceholder("chat_history"),
-                    ("human", "{input}")
-                ]
-            )
-
-            contextual_retriever = create_history_aware_retriever(
-                llm, retriever, contextualize_q_prompt
-            )
-
-            # logger.debug("Contextualized question prompt created successfully.")
-            return contextual_retriever
-
-        except Exception as e:
-            logger.error(f"Error in create_contextualize_question_prompt: {str(e)}")
-            raise e
-
-
-    def get_session_history(self, session_id: str, store: dict) -> BaseChatMessageHistory:
-        """Retrieve or create a new chat message history for the given session ID."""
-        try:
-            if session_id not in store:
-                # logger.info(f"Creating new session history for: {session_id}")
-                store[session_id] = ChatMessageHistory()
-
-            # logger.debug(f"Session history retrieved for: {session_id}")
-            return store[session_id]
-
-        except Exception as e:
-            logger.error(f"Error in get_session_history: {str(e)}")
-            raise e
 
 
     def create_qa_prompt(self, filename) -> ChatPromptTemplate:
@@ -282,3 +153,38 @@ class RAGUtilities:
         except Exception as e:
             logger.error(f"Error in create_qa_prompt: {str(e)}")
             raise e
+
+    def _contextualize_prompt(self) -> ChatPromptTemplate:
+        system_prompt = (
+            "Given a chat history and the latest user question which might reference context "
+            "in the chat history, reformulate it into a standalone question understandable "
+            "without the chat history. Do NOT answer it; only reformulate it if needed, "
+            "otherwise return it as is."
+        )
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ]
+        )
+
+    def contextualize_question(self, message: str, history_messages: list) -> str:
+        """Rewrite a follow-up into a standalone question using chat history (LLM)."""
+        if not history_messages:
+            return message
+        try:
+            prompt = self._contextualize_prompt()
+            value = prompt.invoke({"chat_history": history_messages, "input": message})
+            return self.llm.invoke(value).content
+        except Exception as e:
+            logger.error(f"contextualize_question failed, using raw message: {e}")
+            return message
+
+    def answer(self, user_input: str, context: str, history_messages: list, filename: str) -> str:
+        """Generate a grounded answer from context + chat history (LLM)."""
+        prompt = self.create_qa_prompt(filename)
+        value = prompt.invoke(
+            {"context": context, "chat_history": history_messages, "input": user_input}
+        )
+        return self.llm.invoke(value).content
