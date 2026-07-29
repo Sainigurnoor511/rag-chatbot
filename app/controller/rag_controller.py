@@ -10,6 +10,7 @@ from app.utilities.rag_utilities import RAGUtilities
 from app.utilities.timer import timer
 from app.retrieval.chunking import chunk_text
 from app.retrieval import bm25_index
+from app.ingestion.parser import parse_document
 from app.retrieval.hybrid_retriever import HybridRetriever
 from app.repository import query_cache
 
@@ -40,7 +41,10 @@ class RAGController:
             filename = os.path.basename(file_path)
             logger.info(f"Embedding '{filename}' into channel '{channel_id}'")
 
-            text = RAGService.get_text(file_path)
+            ext = os.path.splitext(filename)[1].lower().lstrip(".")
+            source_type = "pdf" if ext == "pdf" else "docx"
+            parsed = parse_document(file_path, source_type=source_type)
+            text = parsed.to_text_stream()
             if not text:
                 logger.warning(f"No content extracted from file: {filename}.")
                 return None
