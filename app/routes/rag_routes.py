@@ -8,8 +8,14 @@ from app.repository.channel_repository import register_document
 from fastapi import Form
 import os
 import shutil
+import asyncio
+import uuid
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+
+from app.repository.crawl_jobs import create_job, get_job
+from app.ingestion.pipeline import run_crawl_job
+from app.utilities.rag_utilities import RAGUtilities
 
 def create_error_response(message: str, error_code: int = 500, details: dict = None):
     """Create a standardized error response."""
@@ -38,6 +44,14 @@ class ChatRequest(BaseModel):
     channel_id: str
     message: str
     filename: str | None = None
+
+
+class CrawlRequest(BaseModel):
+    channel_id: str
+    base_url: str
+    include_paths: list[str] = []
+    max_pages: int | None = None
+    max_depth: int | None = None
 
 
 @router.get("/status")
@@ -100,6 +114,55 @@ async def upload_file(request: Request, channel_id: str = Form(...), file: Uploa
         return create_error_response(
             "Internal server error during file processing", 500, {"details": str(e)}
         )
+
+
+@router.post("/crawl", dependencies=[Depends(require_api_key)])
+@limiter.limit(lambda: settings.RATE_LIMIT_UPLOAD)
+async def start_crawl(request: Request, body: CrawlRequest):
+    """Start an async crawl job: scrape a site's same-domain pages and embed them into a channel."""
+    job_id = str(uuid.uuid4())
+    max_pages = body.max_pages or settings.CRAWL_MAX_PAGES
+    max_depth = body.max_depth or settings.CRAWL_MAX_DEPTH
+
+    ok = create_job(job_id, channel_id=body.channel_id, base_url=body.base_url)
+    if not ok:
+        return create_error_response("Failed to create crawl job.", 500)
+
+    embedding_model = RAGUtilities().get_embedding_model()
+    asyncio.create_task(
+        asyncio.to_thread(
+            run_crawl_job,
+            job_id=job_id,
+            channel_id=body.channel_id,
+            base_url=body.base_url,
+            include_paths=body.include_paths,
+            max_pages=max_pages,
+            max_depth=max_depth,
+            embedding_model=embedding_model,
+        )
+    )
+
+    return {
+        "success": True,
+        "message": "Crawl job started",
+        "data": {"job_id": job_id, "status": "queued"},
+        "error": None,
+    }
+
+
+@router.get("/crawl/{job_id}", dependencies=[Depends(require_api_key)])
+async def get_crawl_status(job_id: str):
+    """Poll the status of a crawl job."""
+    job = get_job(job_id)
+    if job is None:
+        return create_error_response("Crawl job not found.", 404)
+
+    return {
+        "success": True,
+        "message": "Crawl job status",
+        "data": job,
+        "error": None,
+    }
 
 
 @router.post("/chat", dependencies=[Depends(require_api_key)])
