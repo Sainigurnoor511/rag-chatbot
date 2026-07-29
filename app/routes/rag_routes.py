@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Depends, Request
 from ..config.settings import settings
 from app.middleware.auth import require_api_key
 from app.middleware.rate_limit import limiter
@@ -177,10 +177,3 @@ async def chat(request: Request, body: ChatRequest):
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return create_error_response("Internal server error during chat processing", 500, {"details": str(e)})
-
-@router.get("/sentry-debug")
-async def trigger_error():
-    if settings.ENVIRONMENT == "production":
-        raise HTTPException(status_code=404, detail="Not found")
-    division_by_zero = 1 / 0
-    return division_by_zero
