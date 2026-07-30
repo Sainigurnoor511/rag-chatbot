@@ -1,5 +1,0 @@
-# Evaluation-only dependencies. Install in an ISOLATED environment — these
-# upgrade shared deps (langchain-core, dill) and must not pollute the serving venv.
-#   python -m venv .venv-eval && .venv-eval\Scripts\pip install -r requirements.txt -r requirements-eval.txt
-ragas==0.4.3
-datasets==4.8.5
