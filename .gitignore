@@ -164,3 +164,5 @@ cython_debug/
 /data
 /later
 /app/models
+/docs
+/tests
