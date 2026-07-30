@@ -5,24 +5,27 @@ from app.config.logger import logger
 
 
 class CrossEncoderReranker:
-    """Local cross-encoder reranker. Model is loaded once and cached on the class."""
+    """Cohere-hosted reranker. Client is created once and cached on the class."""
 
-    _model = None
+    _client = None
 
     @classmethod
-    def _get_model(cls):
-        if cls._model is None:
-            from sentence_transformers import CrossEncoder
-            logger.info(f"Loading reranker model: {settings.RERANKER_MODEL}")
-            cls._model = CrossEncoder(settings.RERANKER_MODEL)
-        return cls._model
+    def _get_client(cls):
+        if cls._client is None:
+            import cohere
+            logger.info(f"Using Cohere reranker model: {settings.RERANKER_MODEL}")
+            cls._client = cohere.Client(settings.COHERE_API_KEY)
+        return cls._client
 
     def rerank(self, query: str, documents: list[Document], top_n: int) -> list[Document]:
-        """Score (query, doc) pairs and return the top_n documents by descending score."""
+        """Score (query, doc) pairs via Cohere Rerank and return the top_n documents."""
         if not documents:
             return []
-        model = self._get_model()
-        pairs = [(query, d.page_content) for d in documents]
-        scores = model.predict(pairs)
-        ranked = sorted(zip(documents, scores), key=lambda pair: pair[1], reverse=True)
-        return [doc for doc, _ in ranked[:top_n]]
+        client = self._get_client()
+        response = client.rerank(
+            query=query,
+            documents=[d.page_content for d in documents],
+            model=settings.RERANKER_MODEL,
+            top_n=top_n,
+        )
+        return [documents[result.index] for result in response.results]

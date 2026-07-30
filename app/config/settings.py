@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     GROQ_API_KEY: str
     GROQ_MODEL: str
+    GROQ_FAST_MODEL: str = "llama-3.1-8b-instant"
     ENVIRONMENT: str = "development"
     
     # Redis Configuration
@@ -37,11 +38,12 @@ class Settings(BaseSettings):
     CHANNEL_TTL_SECONDS: int = 1800  # 30 minutes
 
     # Hybrid retrieval (Phase 2)
-    DENSE_TOP_K: int = 20
-    BM25_TOP_K: int = 20
+    DENSE_TOP_K: int = 10
+    BM25_TOP_K: int = 10
     RRF_K: int = 60
     RERANK_TOP_N: int = 5
-    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    RERANKER_MODEL: str = "rerank-english-v3.0"
+    COHERE_API_KEY: str = ""
 
     # Production cross-cutting (Phase 3)
     API_KEYS: str = ""  # comma-separated; empty disables auth (dev)

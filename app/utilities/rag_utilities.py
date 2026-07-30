@@ -29,6 +29,7 @@ class RAGUtilities:
     # Class-level caching to prevent reloading
     _model_instance = None
     _llm_instance = None
+    _fast_llm_instance = None
 
     def __init__(self):
         """Initialize the LLM and embedding model only once."""
@@ -43,6 +44,18 @@ class RAGUtilities:
                 logger.info("LLM initialized successfully")
 
             self.llm = RAGUtilities._llm_instance
+
+            # Small/fast model for cheap tasks (e.g. query rewriting) where the
+            # full-quality GROQ_MODEL would be unnecessarily slow.
+            if RAGUtilities._fast_llm_instance is None:
+                RAGUtilities._fast_llm_instance = ChatGroq(
+                    api_key=settings.GROQ_API_KEY,
+                    temperature=0.1,
+                    model_name=settings.GROQ_FAST_MODEL,
+                )
+                logger.info("Fast LLM initialized successfully")
+
+            self.fast_llm = RAGUtilities._fast_llm_instance
 
             # Use cached model if it exists
             if RAGUtilities._model_instance is None:
@@ -166,13 +179,20 @@ class RAGUtilities:
         )
 
     def contextualize_question(self, message: str, history_messages: list) -> str:
-        """Rewrite a follow-up into a standalone question using chat history (LLM)."""
-        if not history_messages:
+        """Rewrite a follow-up into a standalone question using chat history.
+
+        Uses the fast/small LLM (GROQ_FAST_MODEL) since this is a cheap
+        rephrasing task, not full answer generation. Skipped (saves one LLM
+        round-trip) until there's at least one full prior exchange (a human
+        + AI message pair) - the first follow-up after the opening message
+        is rarely ambiguous enough to need rewriting.
+        """
+        if len(history_messages) < 2:
             return message
         try:
             prompt = self._contextualize_prompt()
             value = prompt.invoke({"chat_history": history_messages, "input": message})
-            return self.llm.invoke(value).content
+            return self.fast_llm.invoke(value).content
         except Exception as e:
             logger.error(f"contextualize_question failed, using raw message: {e}")
             return message
